@@ -3,6 +3,7 @@ import { useState } from 'react'
 import type {
   AnyTemplateDefinition,
   ParameterField,
+  JsonValue,
   ParameterValues,
   PrimitiveParamValue,
 } from '../lib/gridfinity/types'
@@ -11,7 +12,7 @@ interface ParameterPanelProps {
   template: AnyTemplateDefinition
   values: ParameterValues
   validationErrors: string[]
-  onChange: (key: string, value: string | number | boolean) => void
+  onChange: (key: string, value: JsonValue) => void
   onReset: () => void
 }
 

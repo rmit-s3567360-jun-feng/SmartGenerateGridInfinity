@@ -90,4 +90,23 @@ describe('GeneratorPage', () => {
     expect(screen.getByText('深度单元')).toBeInTheDocument()
     expect(screen.getByText('高度单元')).toBeInTheDocument()
   })
+
+  it('renders the photo outline workflow for the dedicated template', () => {
+    render(
+      <MemoryRouter initialEntries={['/generator/photo-outline-bin']}>
+        <Routes>
+          <Route element={<GeneratorPage />} path="/generator/:templateId" />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(screen.getAllByText('照片轮廓收纳').length).toBeGreaterThan(0)
+    expect(screen.getByText('上传俯拍照片')).toBeInTheDocument()
+    expect(screen.getByText('图像叠加')).toBeInTheDocument()
+    expect(screen.getByText('物体高度')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '下载 L 形标尺 STL' })).toHaveAttribute(
+      'href',
+      '/downloads/photo-outline-l-ruler-80x60mm.stl',
+    )
+  })
 })

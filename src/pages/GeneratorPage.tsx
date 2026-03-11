@@ -2,12 +2,17 @@ import { useEffect, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 
 import { ParameterPanel } from '../components/ParameterPanel'
+import { PhotoOutlineWorkflow } from '../components/PhotoOutlineWorkflow'
 import { PreviewCanvas } from '../components/PreviewCanvas'
 import { useModelGenerator } from '../hooks/useModelGenerator'
 import {
   getMemoryCardRecommendationSummary,
   normalizeMemoryCardModeParams,
 } from '../lib/gridfinity/memoryCard'
+import {
+  getPhotoOutlineRecommendationSummary,
+  PHOTO_OUTLINE_RULER_DOWNLOAD_PATH,
+} from '../lib/gridfinity/photoOutline'
 import { templateCatalog } from '../lib/gridfinity/templateCatalog'
 import {
   defaultGridfinitySpec,
@@ -23,8 +28,10 @@ import type {
   MemoryCardMode,
   MemoryCardTrayParams,
   ParameterValues,
+  PhotoOutlineBinParams,
   TemplateDefinition,
   TemplateId,
+  JsonValue,
 } from '../lib/gridfinity/types'
 
 function getGenericInnerSpan(
@@ -47,7 +54,8 @@ function isTemplateId(value: string | undefined): value is TemplateId {
     value === 'generic-bin' ||
     value === 'screwdriver-rack' ||
     value === 'memory-card-tray' ||
-    value === 'pliers-holder'
+    value === 'pliers-holder' ||
+    value === 'photo-outline-bin'
   )
 }
 
@@ -63,6 +71,8 @@ export function GeneratorPage() {
   const template = getTemplateDefinition(templateId)
 
   const [rawParams, setRawParams] = useState<ParameterValues>(template.defaultParams)
+  const photoParams =
+    templateId === 'photo-outline-bin' ? (rawParams as PhotoOutlineBinParams) : null
   const {
     exportModel,
     generation,
@@ -97,11 +107,114 @@ export function GeneratorPage() {
           }
         })()
       : null
-  const currentGridX = memoryCardSummary?.size.gridX ?? Number(rawParams.gridX ?? template.defaultParams.gridX)
-  const currentGridY = memoryCardSummary?.size.gridY ?? Number(rawParams.gridY ?? template.defaultParams.gridY)
+  const photoOutlineSummary =
+    templateId === 'photo-outline-bin'
+      ? (() => {
+          try {
+            const photoTemplate = template as TemplateDefinition<PhotoOutlineBinParams>
+            const parsed = photoTemplate.schema.safeParse(rawParams)
+
+            if (!parsed.success) {
+              return null
+            }
+
+            return getPhotoOutlineRecommendationSummary(parsed.data, defaultGridfinitySpec)
+          } catch {
+            return null
+          }
+        })()
+      : null
+  const currentGridX =
+    memoryCardSummary?.size.gridX ??
+    photoOutlineSummary?.size.gridX ??
+    Number(rawParams.gridX ?? template.defaultParams.gridX)
+  const currentGridY =
+    memoryCardSummary?.size.gridY ??
+    photoOutlineSummary?.size.gridY ??
+    Number(rawParams.gridY ?? template.defaultParams.gridY)
   const currentHeightUnits =
     memoryCardSummary?.size.heightUnits ??
+    photoOutlineSummary?.size.heightUnits ??
     Number(rawParams.heightUnits ?? template.defaultParams.heightUnits)
+
+  function handleParamChange(key: string, value: JsonValue) {
+    setRawParams((current) => {
+      let next = { ...current, [key]: value }
+
+      if (templateId === 'generic-bin') {
+        if (key === 'compartmentsX') {
+          const dividerThickness = Number(
+            (next as GenericBinParams).dividerThickness ?? 2,
+          )
+          const [dividerX1, dividerX2, dividerX3] =
+            getDefaultGenericDividerOffsets(
+              getGenericInnerSpan('x', next),
+              dividerThickness,
+              Number(value),
+            )
+
+          next = {
+            ...(next as GenericBinParams),
+            dividerX1,
+            dividerX2,
+            dividerX3,
+          }
+        }
+
+        if (key === 'compartmentsY') {
+          const dividerThickness = Number(
+            (next as GenericBinParams).dividerThickness ?? 2,
+          )
+          const [dividerY1, dividerY2, dividerY3] =
+            getDefaultGenericDividerOffsets(
+              getGenericInnerSpan('y', next),
+              dividerThickness,
+              Number(value),
+            )
+
+          next = {
+            ...(next as GenericBinParams),
+            dividerY1,
+            dividerY2,
+            dividerY3,
+          }
+        }
+      }
+
+      if (templateId === 'memory-card-tray') {
+        if (key === 'mode' && typeof value === 'string') {
+          next = normalizeMemoryCardModeParams(
+            next as MemoryCardTrayParams,
+            value as MemoryCardMode,
+          )
+        }
+
+        if (
+          (key === 'sdCount' || key === 'microSdCount') &&
+          String(next.mode) === 'mixed'
+        ) {
+          next.quantity =
+            Number(next.sdCount ?? 0) + Number(next.microSdCount ?? 0)
+        }
+
+        if (
+          key === 'gridX' ||
+          key === 'gridY' ||
+          key === 'heightUnits'
+        ) {
+          next.lockOuterSize = true
+        }
+
+        if (key === 'lockOuterSize' && value === true && memoryCardSummary) {
+          next.gridX = memoryCardSummary.size.gridX
+          next.gridY = memoryCardSummary.size.gridY
+          next.heightUnits = memoryCardSummary.size.heightUnits
+        }
+      }
+
+      return next
+    })
+  }
 
   async function handleExport() {
     const stlBuffer = await exportModel()
@@ -154,100 +267,38 @@ export function GeneratorPage() {
         ))}
       </nav>
 
-      <section className="workspace">
-        <ParameterPanel
-          key={template.id}
-          template={template}
-          validationErrors={validationErrors}
-          values={rawParams}
-          onChange={(key, value) => {
-            setRawParams((current) => {
-              let next = { ...current, [key]: value }
+      <section className={templateId === 'photo-outline-bin' ? 'workspace workspace--photo' : 'workspace'}>
+          {templateId === 'photo-outline-bin' ? (
+          <PhotoOutlineWorkflow
+            generation={generation}
+            isGenerating={isGenerating}
+            onChange={handleParamChange}
+            onReset={() => {
+              setRawParams(template.defaultParams)
+            }}
+            validationErrors={validationErrors}
+            values={photoParams as PhotoOutlineBinParams}
+          />
+        ) : (
+          <>
+            <ParameterPanel
+              key={template.id}
+              template={template}
+              validationErrors={validationErrors}
+              values={rawParams}
+              onChange={handleParamChange}
+              onReset={() => {
+                setRawParams(template.defaultParams)
+              }}
+            />
 
-              if (templateId === 'generic-bin') {
-                if (key === 'compartmentsX') {
-                  const dividerThickness = Number(
-                    (next as GenericBinParams).dividerThickness ?? 2,
-                  )
-                  const [dividerX1, dividerX2, dividerX3] =
-                    getDefaultGenericDividerOffsets(
-                      getGenericInnerSpan('x', next),
-                      dividerThickness,
-                      Number(value),
-                    )
-
-                  next = {
-                    ...(next as GenericBinParams),
-                    dividerX1,
-                    dividerX2,
-                    dividerX3,
-                  }
-                }
-
-                if (key === 'compartmentsY') {
-                  const dividerThickness = Number(
-                    (next as GenericBinParams).dividerThickness ?? 2,
-                  )
-                  const [dividerY1, dividerY2, dividerY3] =
-                    getDefaultGenericDividerOffsets(
-                      getGenericInnerSpan('y', next),
-                      dividerThickness,
-                      Number(value),
-                    )
-
-                  next = {
-                    ...(next as GenericBinParams),
-                    dividerY1,
-                    dividerY2,
-                    dividerY3,
-                  }
-                }
-              }
-
-              if (templateId === 'memory-card-tray') {
-                if (key === 'mode' && typeof value === 'string') {
-                  next = normalizeMemoryCardModeParams(
-                    next as MemoryCardTrayParams,
-                    value as MemoryCardMode,
-                  )
-                }
-
-                if (
-                  (key === 'sdCount' || key === 'microSdCount') &&
-                  String(next.mode) === 'mixed'
-                ) {
-                  next.quantity =
-                    Number(next.sdCount ?? 0) + Number(next.microSdCount ?? 0)
-                }
-
-                if (
-                  key === 'gridX' ||
-                  key === 'gridY' ||
-                  key === 'heightUnits'
-                ) {
-                  next.lockOuterSize = true
-                }
-
-                if (key === 'lockOuterSize' && value === true && memoryCardSummary) {
-                  next.gridX = memoryCardSummary.size.gridX
-                  next.gridY = memoryCardSummary.size.gridY
-                  next.heightUnits = memoryCardSummary.size.heightUnits
-                }
-              }
-
-              return next
-            })
-          }}
-          onReset={() => {
-            setRawParams(template.defaultParams)
-          }}
-        />
-
-        <PreviewCanvas
-          bounds={generation?.bounds ?? null}
-          isLoading={isGenerating}
-          positions={generation?.meshData.positions ?? null}
-        />
+            <PreviewCanvas
+              bounds={generation?.bounds ?? null}
+              isLoading={isGenerating}
+              positions={generation?.meshData.positions ?? null}
+            />
+          </>
+        )}
 
         <aside className="panel panel--info">
           <div className="panel__header">
@@ -309,6 +360,49 @@ export function GeneratorPage() {
                 </li>
                 <li>布局方式: {memoryCardSummary.arrangementLabel}</li>
                 <li>总卡数: {memoryCardSummary.quantity}</li>
+              </ul>
+            </div>
+          ) : null}
+
+          {photoOutlineSummary ? (
+            <div className="info-section">
+              <h3>轮廓求解结果</h3>
+              <ul>
+                <li>
+                  推荐尺寸: {photoOutlineSummary.size.gridX} x {photoOutlineSummary.size.gridY} x{' '}
+                  {photoOutlineSummary.size.heightUnits}
+                </li>
+                <li>摆放方向: {photoOutlineSummary.orientationLabel}</li>
+                <li>取物凹槽: {photoOutlineSummary.gripLabel}</li>
+                <li>
+                  轮廓尺寸: {photoOutlineSummary.contourWidthMm.toFixed(1)} x{' '}
+                  {photoOutlineSummary.contourHeightMm.toFixed(1)} mm
+                </li>
+                <li>缩放比例: {photoOutlineSummary.mmPerPixel.toFixed(4)} mm/px</li>
+                <li>关键点数量: {photoOutlineSummary.pointCount}</li>
+              </ul>
+            </div>
+          ) : null}
+
+          {templateId === 'photo-outline-bin' ? (
+            <div className="info-section">
+              <h3>标尺校准</h3>
+              <ul>
+                <li>
+                  标尺状态:{' '}
+                  {photoParams?.analysis?.ruler.status === 'detected'
+                      ? '已识别'
+                      : photoParams?.analysis
+                        ? '未识别'
+                        : '等待上传'}
+                </li>
+                <li>已知尺寸: 80 x 60 mm L 形标尺</li>
+                <li>
+                  <a download href={PHOTO_OUTLINE_RULER_DOWNLOAD_PATH}>
+                    下载标尺 STL
+                  </a>
+                </li>
+                <li>首版边界: 单物体、俯拍、干净背景、同平面校准</li>
               </ul>
             </div>
           ) : null}

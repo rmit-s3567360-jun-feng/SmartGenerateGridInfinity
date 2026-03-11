@@ -3,9 +3,17 @@ import { measurements } from '@jscad/modeling'
 import { createBaseBinSolid } from './base'
 import { generateModel, serializeGeometryToStlParts } from './generation'
 import { resolveMemoryCardPlan } from './memoryCard'
+import {
+  createPhotoOutlineFixtureAnalysis,
+  resolvePhotoOutlinePlan,
+} from './photoOutline'
 import { defaultGridfinitySpec } from './spec'
 import { templateList } from './templates'
-import type { BaseBinParams, MemoryCardTrayParams } from './types'
+import type {
+  BaseBinParams,
+  MemoryCardTrayParams,
+  PhotoOutlineBinParams,
+} from './types'
 
 const { measureVolume } = measurements
 
@@ -15,7 +23,13 @@ describe('gridfinity model generation', () => {
     (_templateId, template) => {
       const { geometry, result } = generateModel({
         templateId: template.id,
-        params: template.defaultParams,
+        params:
+          template.id === 'photo-outline-bin'
+            ? {
+                ...(template.defaultParams as PhotoOutlineBinParams),
+                analysis: createPhotoOutlineFixtureAnalysis(),
+              }
+            : template.defaultParams,
         specVersion: defaultGridfinitySpec.version,
       })
       const stlParts = serializeGeometryToStlParts(geometry)
@@ -26,6 +40,14 @@ describe('gridfinity model generation', () => {
               template.defaultParams as MemoryCardTrayParams,
               defaultGridfinitySpec,
             ).resolvedParams
+          : template.id === 'photo-outline-bin'
+            ? resolvePhotoOutlinePlan(
+                {
+                  ...(template.defaultParams as PhotoOutlineBinParams),
+                  analysis: createPhotoOutlineFixtureAnalysis(),
+                },
+                defaultGridfinitySpec,
+              ).resolvedParams
           : template.defaultParams
       const baseSolid = createBaseBinSolid(baseParams, defaultGridfinitySpec)
       const carvedRatio = measureVolume(geometry) / measureVolume(baseSolid)
@@ -54,5 +76,22 @@ describe('gridfinity model generation', () => {
         specVersion: defaultGridfinitySpec.version,
       }),
     ).toThrow()
+  })
+
+  it('extracts a valid plan for the photo outline template fixture', () => {
+    const plan = resolvePhotoOutlinePlan(
+      {
+        ...(templateList.find((template) => template.id === 'photo-outline-bin')!
+          .defaultParams as PhotoOutlineBinParams),
+        analysis: createPhotoOutlineFixtureAnalysis(),
+      },
+      defaultGridfinitySpec,
+    )
+
+    expect(plan.size.gridX).toBeGreaterThanOrEqual(1)
+    expect(plan.size.gridY).toBeGreaterThanOrEqual(1)
+    expect(plan.size.heightUnits).toBeGreaterThanOrEqual(2)
+    expect(plan.cavityPointsMm.length).toBeGreaterThanOrEqual(4)
+    expect(plan.mmPerPixel).toBeGreaterThan(0)
   })
 })

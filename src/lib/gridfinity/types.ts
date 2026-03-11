@@ -6,9 +6,11 @@ export type TemplateId =
   | 'screwdriver-rack'
   | 'memory-card-tray'
   | 'pliers-holder'
+  | 'photo-outline-bin'
 
 export type PrimitiveParamValue = string | number | boolean
-export type ParameterValues = Record<string, PrimitiveParamValue>
+export type JsonValue = unknown
+export type ParameterValues = Record<string, unknown>
 export type ParameterFieldSection = 'basic' | 'advanced'
 
 export interface GridfinitySpec {
@@ -86,6 +88,79 @@ export interface PliersHolderParams extends BaseBinParams {
   handleOpening: number
 }
 
+export interface PhotoPoint {
+  x: number
+  y: number
+}
+
+export interface PhotoBounds {
+  minX: number
+  minY: number
+  maxX: number
+  maxY: number
+  width: number
+  height: number
+}
+
+export type PhotoRulerCorner =
+  | 'top-left'
+  | 'top-right'
+  | 'bottom-left'
+  | 'bottom-right'
+
+export interface PhotoOutlineSource {
+  name: string
+  width: number
+  height: number
+}
+
+export interface PhotoOutlineRulerDetection {
+  status: 'detected' | 'missing'
+  corner: PhotoRulerCorner | null
+  confidence: number
+  mmPerPixel: number
+  knownWidthMm: number
+  knownHeightMm: number
+  barThicknessPx: number
+  boundsPx: PhotoBounds | null
+}
+
+export interface PhotoOutlineContour {
+  pointsPx: PhotoPoint[]
+  pointsMm: PhotoPoint[]
+  boundsPx: PhotoBounds
+  boundsMm: PhotoBounds
+  widthMm: number
+  heightMm: number
+  areaMm2: number
+}
+
+export interface PhotoOutlineAnalysis {
+  status: 'ready' | 'error'
+  message: string | null
+  source: PhotoOutlineSource
+  ruler: PhotoOutlineRulerDetection
+  contour: PhotoOutlineContour | null
+  detection: {
+    foregroundThreshold: number
+    simplifyTolerance: number
+  }
+}
+
+export type PhotoGripMode = 'double-sided' | 'single-sided' | 'auto-side'
+export type PhotoSingleGripSide = 'left' | 'right'
+
+export interface PhotoOutlineBinParams extends BaseBinParams {
+  objectHeight: number
+  cavityClearance: number
+  depthClearance: number
+  gripMode: PhotoGripMode
+  singleGripSide: PhotoSingleGripSide
+  foregroundThreshold: number
+  simplifyTolerance: number
+  analysis: PhotoOutlineAnalysis | null
+}
+
 export interface FieldOption {
   label: string
   value: string
@@ -155,6 +230,7 @@ export type AnyTemplateDefinition =
   | TemplateDefinition<ScrewdriverRackParams>
   | TemplateDefinition<MemoryCardTrayParams>
   | TemplateDefinition<PliersHolderParams>
+  | TemplateDefinition<PhotoOutlineBinParams>
 
 export interface GenerationRequest {
   templateId: TemplateId

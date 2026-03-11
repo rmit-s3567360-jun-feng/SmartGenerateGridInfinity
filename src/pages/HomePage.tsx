@@ -12,7 +12,7 @@ export function HomePage() {
           <h1>用参数直接生成可打印的 Gridfinity 收纳模型</h1>
           <p className="hero__copy">
             选择模板、调尺寸、实时预览并导出 STL。首版聚焦最常用的
-            Gridfinity bin 变体，覆盖通用盒体、螺丝刀、内存卡和钳子收纳。
+            Gridfinity bin 变体，覆盖通用盒体、螺丝刀、内存卡、钳子和照片轮廓收纳。
           </p>
           <div className="hero__actions">
             <Link className="button" to="/generator/generic-bin">
@@ -45,7 +45,7 @@ export function HomePage() {
       <section className="template-section" id="templates">
         <div className="section-heading">
           <p className="panel__eyebrow">模板库</p>
-          <h2>先用最常见的四种收纳场景切入</h2>
+          <h2>先用五种高频收纳场景切入</h2>
           <p>
             模板都是配置驱动的。后续要加底板、盖子或新工具类型时，只需要新增
             schema、字段描述和建模函数。

@@ -11,6 +11,10 @@ import {
   getMemoryCardModeDefaults,
   resolveMemoryCardPlan,
 } from './memoryCard'
+import {
+  buildPhotoOutlineBin,
+  photoOutlineDefaultParams,
+} from './photoOutline'
 import { defaultGridfinitySpec, getBinMetrics } from './spec'
 import type {
   AnyTemplateDefinition,
@@ -137,6 +141,81 @@ const pliersHolderSchema = baseSchema.extend({
   channelDepth: z.coerce.number().min(10).max(32),
   spacing: z.coerce.number().min(4).max(20),
   handleOpening: z.coerce.number().min(10).max(28),
+})
+
+const photoPointSchema = z.object({
+  x: z.number(),
+  y: z.number(),
+})
+
+const photoBoundsSchema = z.object({
+  minX: z.number(),
+  minY: z.number(),
+  maxX: z.number(),
+  maxY: z.number(),
+  width: z.number().nonnegative(),
+  height: z.number().nonnegative(),
+})
+
+const photoOutlineAnalysisSchema = z.object({
+  status: z.enum(['ready', 'error']),
+  message: z.string().nullable(),
+  source: z.object({
+    name: z.string(),
+    width: z.number().positive(),
+    height: z.number().positive(),
+  }),
+  ruler: z.object({
+    status: z.enum(['detected', 'missing']),
+    corner: z.enum(['top-left', 'top-right', 'bottom-left', 'bottom-right']).nullable(),
+    confidence: z.number().min(0).max(1),
+    mmPerPixel: z.number().min(0),
+    knownWidthMm: z.number().positive(),
+    knownHeightMm: z.number().positive(),
+    barThicknessPx: z.number().min(0),
+    boundsPx: photoBoundsSchema.nullable(),
+  }),
+  contour: z.object({
+    pointsPx: z.array(photoPointSchema).min(4),
+    pointsMm: z.array(photoPointSchema).min(4),
+    boundsPx: photoBoundsSchema,
+    boundsMm: photoBoundsSchema,
+    widthMm: z.number().positive(),
+    heightMm: z.number().positive(),
+    areaMm2: z.number().positive(),
+  }).nullable(),
+  detection: z.object({
+    foregroundThreshold: z.number().min(10).max(180),
+    simplifyTolerance: z.number().min(0.5).max(18),
+  }),
+})
+
+const photoOutlineBinSchema = baseSchema.extend({
+  objectHeight: z.coerce.number().min(4).max(84),
+  cavityClearance: z.coerce.number().min(0.3).max(4),
+  depthClearance: z.coerce.number().min(0).max(8),
+  gripMode: z.enum(['double-sided', 'single-sided', 'auto-side']),
+  singleGripSide: z.enum(['left', 'right']),
+  foregroundThreshold: z.coerce.number().min(10).max(180),
+  simplifyTolerance: z.coerce.number().min(0.5).max(18),
+  analysis: photoOutlineAnalysisSchema.nullable(),
+}).superRefine((value, context) => {
+  if (!value.analysis) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: '请先上传图片并完成轮廓识别。',
+      path: ['analysis'],
+    })
+    return
+  }
+
+  if (value.analysis.status !== 'ready' || !value.analysis.contour) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: value.analysis.message ?? '请先修正标尺或轮廓识别结果。',
+      path: ['analysis'],
+    })
+  }
 })
 
 function buildGenericBin(
@@ -710,6 +789,19 @@ export const templateDefinitions: Record<TemplateId, AnyTemplateDefinition> = {
       booleanField<PliersHolderParams>('magnetHoles', '磁铁孔', '底部增加 6x2mm 磁铁孔'),
     ],
     build: buildPliersHolder,
+  },
+  'photo-outline-bin': {
+    id: 'photo-outline-bin',
+    name: '照片轮廓收纳',
+    tagline: '上传俯拍照片后自动识别轮廓',
+    summary: '基于 L 形标尺完成尺度校准，抽取关键点轮廓并生成首版型腔收纳。 ',
+    description:
+      '首版支持单物体俯拍、L 形标尺校准、关键点拖拽修正，以及 0° / 90° 自动尺寸搜索。',
+    previewFacts: ['L 形标尺校准', '关键点拖拽审查', '自动搜索最小外部尺寸'],
+    schema: photoOutlineBinSchema,
+    defaultParams: photoOutlineDefaultParams,
+    fields: [],
+    build: buildPhotoOutlineBin,
   },
 }
 

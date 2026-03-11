@@ -95,6 +95,8 @@ export function useModelGenerator(
 
     if (!parsed.success) {
       setIsGenerating(false)
+      setGeneration(null)
+      setRuntimeError(null)
       return
     }
 
@@ -126,6 +128,7 @@ export function useModelGenerator(
           return
         }
 
+        setGeneration(null)
         setRuntimeError(error instanceof Error ? error.message : '生成失败。')
       })
       .finally(() => {

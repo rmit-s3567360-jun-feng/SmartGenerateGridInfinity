@@ -7,7 +7,7 @@ const { subtract, union } = booleans
 const { extrudeFromSlices, extrudeLinear, slice } = extrusions
 const { geom2 } = geometries
 const { mat4 } = maths
-const { roundedCuboid, roundedRectangle, cylinder, cuboid } = primitives
+const { roundedRectangle, cylinder, cuboid } = primitives
 const { translate } = transforms
 
 export function createBaseBinSolid(
@@ -132,12 +132,16 @@ export function createPocketBetween(
     })
   }
 
-  return roundedCuboid({
-    size: [width, depth, height],
-    center: [centerX, centerY, bottomZ + height / 2],
-    roundRadius: Math.min(cornerRadius, maxRadius),
-    segments,
-  })
+  return translate(
+    [centerX, centerY, bottomZ],
+    createVerticalRoundedPrism(
+      width,
+      depth,
+      height,
+      Math.min(cornerRadius, maxRadius),
+      segments,
+    ),
+  )
 }
 
 export function createVerticalHole(

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:open": "vite --host 0.0.0.0 --open",
     "dev:windows": "scripts\\start-dev.bat",
     "build": "tsc -b && vite build",
     "release:server": "bash ./scripts/build-release.sh",

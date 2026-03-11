@@ -20,5 +20,6 @@ describe('HomePage', () => {
     )
     expect(screen.getByText('螺丝刀收纳')).toBeInTheDocument()
     expect(screen.getByText('内存卡托盘')).toBeInTheDocument()
+    expect(screen.getByText('自动推荐最小尺寸')).toBeInTheDocument()
   })
 })

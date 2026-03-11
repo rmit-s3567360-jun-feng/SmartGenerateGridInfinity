@@ -21,8 +21,8 @@ if not exist node_modules (
 )
 
 echo [INFO] Starting development server...
-echo [INFO] Open http://localhost:5173 in your browser after startup.
-call npm run dev -- --host 0.0.0.0
+echo [INFO] Browser will open automatically after the Vite server starts.
+call npm run dev -- --host 0.0.0.0 --open
 
 if errorlevel 1 (
   echo [ERROR] Development server exited with an error.

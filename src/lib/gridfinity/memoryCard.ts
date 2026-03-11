@@ -58,6 +58,8 @@ interface LayoutCandidate {
   depth: number
   slotWidth: number
   slotDepth: number
+  pocketDepth: number
+  cornerRadius: number
   slotCenters: Array<{ x: number; y: number }>
   gripChannels: Array<{ x: number; y: number; width: number; depth: number }>
 }
@@ -163,10 +165,22 @@ export function normalizeMemoryCardModeParams(
   mode: MemoryCardMode,
 ) {
   const defaults = getMemoryCardModeDefaults(mode)
+  const lockedSize = params.lockOuterSize
+    ? {
+        gridX: params.gridX,
+        gridY: params.gridY,
+        heightUnits: params.heightUnits,
+      }
+    : {
+        gridX: defaults.gridX,
+        gridY: defaults.gridY,
+        heightUnits: defaults.heightUnits,
+      }
 
   return {
     ...params,
     ...defaults,
+    ...lockedSize,
     mode,
   }
 }
@@ -306,27 +320,30 @@ function buildPlanForSize(
   )
   const usableWidth = metrics.innerX - perimeterMargin * 2
   const usableDepth = metrics.innerY - perimeterMargin * 2 - labelBandDepth
+  const interiorFloorZ = getInteriorFloorZ(effectiveParams, spec)
+  const availablePocketDepth = metrics.height - interiorFloorZ - 0.8
 
   if (usableWidth <= 8 || usableDepth <= 8) {
     throw new Error('当前尺寸不足以生成内存卡托盘。')
   }
 
-  const maxPocketDepth = getMaxPocketDepth(effectiveParams)
-  const minimumHeight = getInteriorFloorZ(effectiveParams, spec) + maxPocketDepth + 0.8
-
-  if (metrics.height < minimumHeight) {
+  if (availablePocketDepth <= 1) {
     throw new Error('当前高度不足以生成内存卡托盘。')
   }
 
-  const layout = buildArrangementCandidate(effectiveParams, usableWidth, usableDepth)
+  const layout = buildArrangementCandidate(
+    effectiveParams,
+    usableWidth,
+    usableDepth,
+    availablePocketDepth,
+  )
   const trayCenterY = labelBandDepth > 0 ? -labelBandDepth / 2 : 0
   const trayWidth = Math.min(metrics.innerX, layout.width + perimeterMargin * 2)
   const trayDepth = Math.min(metrics.innerY - labelBandDepth * 0.2, layout.depth + perimeterMargin * 2)
   const trayTopZ = metrics.height + 1
-  const interiorFloorZ = getInteriorFloorZ(effectiveParams, spec)
   const trayBottomZ = Math.max(
     interiorFloorZ,
-    metrics.height - Math.max(maxPocketDepth * 0.6, 1.4),
+    metrics.height - Math.max(layout.maxPocketDepth * 0.6, 1.4),
   )
   const slotPockets = createSlotPockets(
     layout,
@@ -365,6 +382,7 @@ function buildArrangementCandidate(
   params: MemoryCardTrayParams,
   usableWidth: number,
   usableDepth: number,
+  availablePocketDepth: number,
 ) {
   if (params.mode === 'mixed') {
     if (params.sdCount <= 0) {
@@ -374,6 +392,7 @@ function buildArrangementCandidate(
         usableWidth,
         usableDepth,
         params,
+        availablePocketDepth,
       )
       const candidate = candidates[0]
 
@@ -386,6 +405,7 @@ function buildArrangementCandidate(
         arrangementLabel: `仅 microSD 区 ${candidate.columns} x ${candidate.rows}`,
         width: candidate.width,
         depth: candidate.depth,
+        maxPocketDepth: candidate.pocketDepth,
         slotPockets: toGlobalSlotPockets(candidate, 0, 0),
         gripChannels: toGlobalGripChannels(candidate, 0, 0),
         warnings: [] as string[],
@@ -393,7 +413,14 @@ function buildArrangementCandidate(
     }
 
     if (params.microSdCount <= 0) {
-      const candidates = buildSingleTypeCandidates('sd', params.sdCount, usableWidth, usableDepth, params)
+      const candidates = buildSingleTypeCandidates(
+        'sd',
+        params.sdCount,
+        usableWidth,
+        usableDepth,
+        params,
+        availablePocketDepth,
+      )
       const candidate = candidates[0]
 
       if (!candidate) {
@@ -405,17 +432,25 @@ function buildArrangementCandidate(
         arrangementLabel: `仅 SD 区 ${candidate.columns} x ${candidate.rows}`,
         width: candidate.width,
         depth: candidate.depth,
+        maxPocketDepth: candidate.pocketDepth,
         slotPockets: toGlobalSlotPockets(candidate, 0, 0),
         gripChannels: toGlobalGripChannels(candidate, 0, 0),
         warnings: [] as string[],
       }
     }
 
-    return buildMixedArrangement(params, usableWidth, usableDepth)
+    return buildMixedArrangement(params, usableWidth, usableDepth, availablePocketDepth)
   }
 
   const kind: CardKind = params.mode === 'sd-compact' ? 'sd' : 'micro-sd'
-  const candidates = buildSingleTypeCandidates(kind, params.quantity, usableWidth, usableDepth, params)
+  const candidates = buildSingleTypeCandidates(
+    kind,
+    params.quantity,
+    usableWidth,
+    usableDepth,
+    params,
+    availablePocketDepth,
+  )
   const candidate = candidates[0]
 
   if (!candidate) {
@@ -427,6 +462,7 @@ function buildArrangementCandidate(
     arrangementLabel: `${CARD_PROFILES[kind].label} ${candidate.columns} x ${candidate.rows} 紧凑布局`,
     width: candidate.width,
     depth: candidate.depth,
+    maxPocketDepth: candidate.pocketDepth,
     slotPockets: toGlobalSlotPockets(candidate, 0, 0),
     gripChannels: toGlobalGripChannels(candidate, 0, 0),
     warnings: [] as string[],
@@ -437,14 +473,23 @@ function buildMixedArrangement(
   params: MemoryCardTrayParams,
   usableWidth: number,
   usableDepth: number,
+  availablePocketDepth: number,
 ) {
-  const sdCandidates = buildSingleTypeCandidates('sd', params.sdCount, usableWidth, usableDepth, params)
+  const sdCandidates = buildSingleTypeCandidates(
+    'sd',
+    params.sdCount,
+    usableWidth,
+    usableDepth,
+    params,
+    availablePocketDepth,
+  )
   const microCandidates = buildSingleTypeCandidates(
     'micro-sd',
     params.microSdCount,
     usableWidth,
     usableDepth,
     params,
+    availablePocketDepth,
   )
   const groupGap = Math.max(params.minGripMargin * 1.6, 4)
   const combined = []
@@ -463,6 +508,7 @@ function buildMixedArrangement(
           arrangementLabel: 'SD 与 microSD 左右分区',
           width: sideBySideWidth,
           depth: sideBySideDepth,
+          maxPocketDepth: Math.max(sdCandidate.pocketDepth, microCandidate.pocketDepth),
           slotPockets: [
             ...toGlobalSlotPockets(sdCandidate, sdOffsetX, 0),
             ...toGlobalSlotPockets(microCandidate, microOffsetX, 0),
@@ -487,6 +533,7 @@ function buildMixedArrangement(
           arrangementLabel: 'SD 与 microSD 前后分区',
           width: frontBackWidth,
           depth: frontBackDepth,
+          maxPocketDepth: Math.max(sdCandidate.pocketDepth, microCandidate.pocketDepth),
           slotPockets: [
             ...toGlobalSlotPockets(sdCandidate, 0, sdOffsetY),
             ...toGlobalSlotPockets(microCandidate, 0, microOffsetY),
@@ -513,6 +560,7 @@ function buildMixedArrangement(
     arrangementLabel: best.arrangementLabel,
     width: best.width,
     depth: best.depth,
+    maxPocketDepth: best.maxPocketDepth,
     slotPockets: best.slotPockets,
     gripChannels: best.gripChannels,
     warnings: [] as string[],
@@ -525,6 +573,7 @@ function buildSingleTypeCandidates(
   usableWidth: number,
   usableDepth: number,
   params: MemoryCardTrayParams,
+  availablePocketDepth: number,
 ) {
   if (count <= 0) {
     return []
@@ -548,6 +597,10 @@ function buildSingleTypeCandidates(
   const candidates: LayoutCandidate[] = []
 
   for (const orientation of orientations) {
+    if (profile.pocketDepth > availablePocketDepth) {
+      continue
+    }
+
     for (let columns = 1; columns <= count; columns += 1) {
       const rows = Math.ceil(count / columns)
       const width = columns * orientation.slotWidth + (columns - 1) * gap
@@ -598,6 +651,8 @@ function buildSingleTypeCandidates(
         depth,
         slotWidth: orientation.slotWidth,
         slotDepth: orientation.slotDepth,
+        pocketDepth: profile.pocketDepth,
+        cornerRadius: profile.cornerRadius,
         slotCenters,
         gripChannels,
       })
@@ -628,6 +683,8 @@ function toGlobalSlotPockets(candidate: LayoutCandidate, offsetX: number, offset
     centerY: center.y + offsetY,
     width: candidate.slotWidth,
     depth: candidate.slotDepth,
+    pocketDepth: candidate.pocketDepth,
+    cornerRadius: candidate.cornerRadius,
   }))
 }
 
@@ -648,6 +705,8 @@ function createSlotPockets(
       centerY: number
       width: number
       depth: number
+      pocketDepth: number
+      cornerRadius: number
     }>
   },
   trayCenterY: number,
@@ -656,8 +715,7 @@ function createSlotPockets(
   topZ: number,
 ) {
   return layout.slotPockets.map((slot) => {
-    const profile = CARD_PROFILES[slot.kind]
-    const bottomZ = Math.max(interiorFloorZ, height - profile.pocketDepth)
+    const bottomZ = Math.max(interiorFloorZ, height - slot.pocketDepth)
 
     return {
       kind: slot.kind,
@@ -667,7 +725,7 @@ function createSlotPockets(
       depth: slot.depth,
       bottomZ,
       topZ,
-      cornerRadius: profile.cornerRadius,
+      cornerRadius: slot.cornerRadius,
     }
   })
 }
@@ -697,16 +755,6 @@ function createGripChannels(
     topZ,
     cornerRadius: 0.8,
   }))
-}
-
-function getMaxPocketDepth(params: MemoryCardTrayParams) {
-  if (params.mode === 'mixed') {
-    return Math.max(CARD_PROFILES.sd.pocketDepth, CARD_PROFILES['micro-sd'].pocketDepth)
-  }
-
-  return params.mode === 'sd-compact'
-    ? CARD_PROFILES.sd.pocketDepth
-    : CARD_PROFILES['micro-sd'].pocketDepth
 }
 
 function createCenteredPositions(count: number, itemSize: number, gap: number) {

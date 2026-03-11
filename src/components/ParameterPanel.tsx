@@ -30,7 +30,14 @@ export function ParameterPanel({
     }
 
     return field.visibleWhen.every((rule) => {
-      return rule.values.includes(values[rule.key] as PrimitiveParamValue)
+      const rawValue = values[rule.key] as PrimitiveParamValue
+      const normalizedValue =
+        typeof rawValue === 'string' &&
+        rule.values.some((candidate) => typeof candidate === 'number')
+          ? Number(rawValue)
+          : rawValue
+
+      return rule.values.includes(normalizedValue)
     })
   })
   const basicFields = visibleFields.filter((field) => field.section !== 'advanced')

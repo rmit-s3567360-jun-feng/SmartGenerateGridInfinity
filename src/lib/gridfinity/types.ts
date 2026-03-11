@@ -39,6 +39,17 @@ export interface BaseBinParams extends ParameterValues {
 export interface GenericBinParams extends BaseBinParams {
   compartmentsX: number
   compartmentsY: number
+  innerWallThicknessX: number
+  innerWallThicknessY: number
+  innerWallThicknessZ: number
+  dividerThickness: number
+  dividerHeight: number
+  dividerX1: number
+  dividerX2: number
+  dividerX3: number
+  dividerY1: number
+  dividerY2: number
+  dividerY3: number
 }
 
 export interface ScrewdriverRackParams extends BaseBinParams {
@@ -50,7 +61,10 @@ export interface ScrewdriverRackParams extends BaseBinParams {
   handleClearance: number
 }
 
-export type MemoryCardMode = 'micro-sd-compact' | 'sd-compact' | 'mixed'
+export type MemoryCardMode =
+  | 'micro-sd-compact'
+  | 'sd-compact'
+  | 'mixed'
 
 export interface MemoryCardTrayParams extends BaseBinParams {
   mode: MemoryCardMode

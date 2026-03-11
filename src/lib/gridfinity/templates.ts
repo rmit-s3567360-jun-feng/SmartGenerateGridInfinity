@@ -74,6 +74,32 @@ const booleanField = <T extends ParameterValues>(
 const genericBinSchema = baseSchema.extend({
   compartmentsX: z.coerce.number().int().min(1).max(4),
   compartmentsY: z.coerce.number().int().min(1).max(4),
+  innerWallThicknessX: z.coerce.number().min(2).max(84),
+  innerWallThicknessY: z.coerce.number().min(2).max(84),
+  innerWallThicknessZ: z.coerce.number().min(2).max(84),
+  dividerThickness: z.coerce.number().min(1.2).max(12),
+  dividerHeight: z.coerce.number().min(2).max(84),
+  dividerX1: z.coerce.number().min(2).max(120),
+  dividerX2: z.coerce.number().min(2).max(120),
+  dividerX3: z.coerce.number().min(2).max(120),
+  dividerY1: z.coerce.number().min(2).max(120),
+  dividerY2: z.coerce.number().min(2).max(120),
+  dividerY3: z.coerce.number().min(2).max(120),
+}).superRefine((value, context) => {
+  validateDividerOrder(
+    [value.dividerX1, value.dividerX2, value.dividerX3],
+    value.compartmentsX,
+    'dividerX1',
+    'X',
+    context,
+  )
+  validateDividerOrder(
+    [value.dividerY1, value.dividerY2, value.dividerY3],
+    value.compartmentsY,
+    'dividerY1',
+    'Y',
+    context,
+  )
 })
 
 const screwdriverRackSchema = baseSchema.extend({
@@ -119,17 +145,23 @@ function buildGenericBin(
 ): TemplateBuildOutput {
   const solid = createBaseBinSolid(params, spec)
   const metrics = getBinMetrics(params, spec)
-  const cavityBottomZ = getInteriorFloorZ(params, spec)
+  const warnings: string[] = []
+  const cavityBottomZ = spec.footHeight + params.innerWallThicknessZ
   const cavityTopZ = metrics.height + 2
   const cavityHeight = cavityTopZ - cavityBottomZ
+  const cavityWidth = Math.max(0, metrics.outerX - params.innerWallThicknessX * 2)
+  const cavityDepth = Math.max(0, metrics.outerY - params.innerWallThicknessY * 2)
 
-  if (metrics.innerX <= 8 || metrics.innerY <= 8 || cavityHeight <= 8) {
-    throw new Error('当前尺寸不足以生成可打印的通用收纳盒。')
+  if (cavityWidth <= 2 || cavityDepth <= 2 || cavityHeight <= 2) {
+    return {
+      geometry: solid,
+      warnings: ['当前 XYZ 内壁厚度已接近实体盒，内部空腔已自动省略。'],
+    }
   }
 
   const cavity = createPocketBetween(
-    metrics.innerX,
-    metrics.innerY,
+    cavityWidth,
+    cavityDepth,
     cavityBottomZ,
     cavityTopZ,
     0,
@@ -140,42 +172,50 @@ function buildGenericBin(
 
   let result = subtract(solid, cavity)
   const dividers = []
-  const dividerHeight = metrics.height - cavityBottomZ
+  const maxDividerHeight = Math.max(metrics.height - cavityBottomZ, 0)
+  const dividerHeight = Math.min(params.dividerHeight, maxDividerHeight)
   const dividerZ = cavityBottomZ + dividerHeight / 2
-  const compartmentWidth =
-    (metrics.innerX - params.wallThickness * (params.compartmentsX - 1)) /
-    params.compartmentsX
-  const compartmentDepth =
-    (metrics.innerY - params.wallThickness * (params.compartmentsY - 1)) /
-    params.compartmentsY
 
-  if (compartmentWidth < 8 || compartmentDepth < 8) {
-    throw new Error('隔仓数量过多，导致单个收纳格宽度不足。')
+  if (params.dividerHeight > maxDividerHeight + 0.01) {
+    warnings.push('隔板高度已自动限制在当前 Z 内壁厚度之上的可用空间内。')
   }
 
-  for (let index = 1; index < params.compartmentsX; index += 1) {
-    const x =
-      -metrics.innerX / 2 +
-      compartmentWidth * index +
-      params.wallThickness * (index - 0.5)
+  const dividerXs = resolveDividerCenters(
+    cavityWidth,
+    params.dividerThickness,
+    [params.dividerX1, params.dividerX2, params.dividerX3],
+    params.compartmentsX,
+    '横向',
+  )
+  const dividerYs = resolveDividerCenters(
+    cavityDepth,
+    params.dividerThickness,
+    [params.dividerY1, params.dividerY2, params.dividerY3],
+    params.compartmentsY,
+    '纵向',
+  )
+
+  for (const x of dividerXs) {
+    if (dividerHeight <= 0) {
+      break
+    }
 
     dividers.push(
       cuboid({
-        size: [params.wallThickness, metrics.innerY, dividerHeight],
+        size: [params.dividerThickness, cavityDepth, dividerHeight],
         center: [x, 0, dividerZ],
       }),
     )
   }
 
-  for (let index = 1; index < params.compartmentsY; index += 1) {
-    const y =
-      -metrics.innerY / 2 +
-      compartmentDepth * index +
-      params.wallThickness * (index - 0.5)
+  for (const y of dividerYs) {
+    if (dividerHeight <= 0) {
+      break
+    }
 
     dividers.push(
       cuboid({
-        size: [metrics.innerX, params.wallThickness, dividerHeight],
+        size: [cavityWidth, params.dividerThickness, dividerHeight],
         center: [0, y, dividerZ],
       }),
     )
@@ -185,7 +225,89 @@ function buildGenericBin(
     result = union(result, ...dividers)
   }
 
-  return { geometry: result, warnings: [] }
+  return { geometry: result, warnings }
+}
+
+function validateDividerOrder(
+  dividerOffsets: number[],
+  compartmentCount: number,
+  pathKey: 'dividerX1' | 'dividerY1',
+  axisLabel: 'X' | 'Y',
+  context: z.RefinementCtx,
+) {
+  const activeOffsets = dividerOffsets.slice(0, Math.max(0, compartmentCount - 1))
+
+  for (let index = 1; index < activeOffsets.length; index += 1) {
+    if (activeOffsets[index] <= activeOffsets[index - 1]) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${axisLabel} 向隔板位置需要按从小到大设置。`,
+        path: [pathKey],
+      })
+      return
+    }
+  }
+}
+
+function resolveDividerCenters(
+  span: number,
+  dividerThickness: number,
+  dividerOffsets: number[],
+  compartmentCount: number,
+  axisLabel: '横向' | '纵向',
+) {
+  const minCompartmentSpan = 8
+  const activeOffsets = dividerOffsets.slice(0, Math.max(0, compartmentCount - 1))
+  const centers = activeOffsets.map(
+    (offset) => -span / 2 + offset + dividerThickness / 2,
+  )
+  let previousEdge = -span / 2
+
+  for (const center of centers) {
+    const compartmentSpan = center - dividerThickness / 2 - previousEdge
+
+    if (compartmentSpan < minCompartmentSpan) {
+      throw new Error(`${axisLabel}隔仓位置过近，导致单个收纳格尺寸不足。`)
+    }
+
+    previousEdge = center + dividerThickness / 2
+  }
+
+  const trailingSpan = span / 2 - previousEdge
+
+  if (trailingSpan < minCompartmentSpan) {
+    throw new Error(`${axisLabel}隔仓位置过近，导致单个收纳格尺寸不足。`)
+  }
+
+  return centers
+}
+
+export function getDefaultGenericDividerOffsets(
+  span: number,
+  dividerThickness: number,
+  compartmentCount: number,
+) {
+  if (compartmentCount <= 1) {
+    return [12, 24, 36] as const
+  }
+
+  const dividerCount = compartmentCount - 1
+  const compartmentSpan =
+    (span - dividerCount * dividerThickness) / compartmentCount
+  const positions = Array.from({ length: dividerCount }, (_, index) =>
+    Number(
+      (
+        compartmentSpan * (index + 1) +
+        dividerThickness * index
+      ).toFixed(1),
+    ),
+  )
+
+  return [
+    positions[0] ?? 12,
+    positions[1] ?? 24,
+    positions[2] ?? 36,
+  ] as const
 }
 
 function buildScrewdriverRack(
@@ -378,10 +500,10 @@ export const templateDefinitions: Record<TemplateId, AnyTemplateDefinition> = {
     id: 'generic-bin',
     name: '通用收纳盒',
     tagline: '最稳的 Gridfinity 起点',
-    summary: '标准开口 bin，支持分仓、磁铁孔和标签 lip。',
+    summary: '标准开口 bin，支持分仓、隔板尺寸、磁铁孔、XYZ 内壁厚度和标签 lip。',
     description:
       '适合装零件、螺丝、电子小件，按 Gridfinity 常见尺寸生成可直接打印的收纳盒。',
-    previewFacts: ['开口 bin', '支持隔仓', '标签 lip 可选'],
+    previewFacts: ['开口 bin', '支持隔板距离/厚度/高度', 'XYZ 内壁厚度可调'],
     schema: genericBinSchema,
     defaultParams: {
       gridX: 2,
@@ -393,15 +515,47 @@ export const templateDefinitions: Record<TemplateId, AnyTemplateDefinition> = {
       labelLip: true,
       compartmentsX: 2,
       compartmentsY: 1,
+      innerWallThicknessX: 2,
+      innerWallThicknessY: 2,
+      innerWallThicknessZ: 2,
+      dividerThickness: 2,
+      dividerHeight: 22,
+      dividerX1: getDefaultGenericDividerOffsets(79.5, 2, 2)[0],
+      dividerX2: getDefaultGenericDividerOffsets(79.5, 2, 2)[1],
+      dividerX3: getDefaultGenericDividerOffsets(79.5, 2, 2)[2],
+      dividerY1: getDefaultGenericDividerOffsets(79.5, 2, 1)[0],
+      dividerY2: getDefaultGenericDividerOffsets(79.5, 2, 1)[1],
+      dividerY3: getDefaultGenericDividerOffsets(79.5, 2, 1)[2],
     },
     fields: [
       numberField<GenericBinParams>('gridX', '宽度单元', 'Gridfinity X 方向单元数', 1, 4, 1),
       numberField<GenericBinParams>('gridY', '深度单元', 'Gridfinity Y 方向单元数', 1, 4, 1),
       numberField<GenericBinParams>('heightUnits', '高度单元', '每单位为 7mm', 2, 12, 1),
-      numberField<GenericBinParams>('wallThickness', '壁厚', '建议 >= 1.6mm', 1.2, 3.6, 0.2),
-      numberField<GenericBinParams>('floorThickness', '底厚', '打印友好的底部厚度', 1.2, 5, 0.2),
+      numberField<GenericBinParams>('innerWallThicknessX', 'X 内壁厚度', '控制左右两侧内壁厚度；加大后会压缩内部宽度', 2, 84, 0.5),
+      numberField<GenericBinParams>('innerWallThicknessY', 'Y 内壁厚度', '控制前后两侧内壁厚度；加大后会压缩内部深度', 2, 84, 0.5),
+      numberField<GenericBinParams>('innerWallThicknessZ', 'Z 内壁厚度', '控制底部向上的实体厚度；加大到极限会接近实心封闭盒', 2, 84, 0.5),
       numberField<GenericBinParams>('compartmentsX', '横向隔仓', 'X 方向分仓数量', 1, 4, 1),
       numberField<GenericBinParams>('compartmentsY', '纵向隔仓', 'Y 方向分仓数量', 1, 4, 1),
+      numberField<GenericBinParams>('dividerThickness', '隔板厚度', '统一控制所有隔板厚度', 1.2, 12, 0.2),
+      numberField<GenericBinParams>('dividerHeight', '隔板高度', '从 Z 内壁厚度之上开始计算的隔板高度', 2, 84, 0.5),
+      numberField<GenericBinParams>('dividerX1', '横向隔板 1 距离', '从左侧最外缘内壁量到第 1 条横向隔板起始边的距离（mm）', 2, 120, 0.5, {
+        visibleWhen: [{ key: 'compartmentsX', values: [2, 3, 4] }],
+      }),
+      numberField<GenericBinParams>('dividerX2', '横向隔板 2 距离', '从左侧最外缘内壁量到第 2 条横向隔板起始边的距离（mm）', 2, 120, 0.5, {
+        visibleWhen: [{ key: 'compartmentsX', values: [3, 4] }],
+      }),
+      numberField<GenericBinParams>('dividerX3', '横向隔板 3 距离', '从左侧最外缘内壁量到第 3 条横向隔板起始边的距离（mm）', 2, 120, 0.5, {
+        visibleWhen: [{ key: 'compartmentsX', values: [4] }],
+      }),
+      numberField<GenericBinParams>('dividerY1', '纵向隔板 1 距离', '从前侧最外缘内壁量到第 1 条纵向隔板起始边的距离（mm）', 2, 120, 0.5, {
+        visibleWhen: [{ key: 'compartmentsY', values: [2, 3, 4] }],
+      }),
+      numberField<GenericBinParams>('dividerY2', '纵向隔板 2 距离', '从前侧最外缘内壁量到第 2 条纵向隔板起始边的距离（mm）', 2, 120, 0.5, {
+        visibleWhen: [{ key: 'compartmentsY', values: [3, 4] }],
+      }),
+      numberField<GenericBinParams>('dividerY3', '纵向隔板 3 距离', '从前侧最外缘内壁量到第 3 条纵向隔板起始边的距离（mm）', 2, 120, 0.5, {
+        visibleWhen: [{ key: 'compartmentsY', values: [4] }],
+      }),
       booleanField<GenericBinParams>('magnetHoles', '磁铁孔', '底部增加 6x2mm 磁铁孔'),
       booleanField<GenericBinParams>('labelLip', '标签 lip', '前侧增加标签唇边'),
     ],
@@ -453,7 +607,7 @@ export const templateDefinitions: Record<TemplateId, AnyTemplateDefinition> = {
     tagline: '自动推荐最小尺寸',
     summary: '根据数量和模式自动推荐更紧凑的 SD / microSD 收纳布局。',
     description:
-      '支持 microSD 极限收纳、SD 紧凑收纳和混合分区三种模式，默认优先压缩外部体积。',
+      '支持 microSD 极限收纳、SD 紧凑收纳和混合分区模式，默认优先压缩外部体积。',
     previewFacts: ['自动推荐尺寸', 'SD / microSD / 混合', '高级参数可折叠'],
     schema: memoryCardTraySchema,
     defaultParams: {
@@ -497,16 +651,10 @@ export const templateDefinitions: Record<TemplateId, AnyTemplateDefinition> = {
       }),
       booleanField<MemoryCardTrayParams>('enableGripCutout', '抓取缺口', '为每一排提供共享抓取通道'),
       booleanField<MemoryCardTrayParams>('enableLabelArea', '标签区', '前侧预留标签区域'),
-      booleanField<MemoryCardTrayParams>('lockOuterSize', '固定外部尺寸', '关闭自动推荐，使用手动指定的外部单元'),
-      numberField<MemoryCardTrayParams>('gridX', '宽度单元', '锁定模式下的 Gridfinity X 单元数', 1, 4, 1, {
-        visibleWhen: [{ key: 'lockOuterSize', values: [true] }],
-      }),
-      numberField<MemoryCardTrayParams>('gridY', '深度单元', '锁定模式下的 Gridfinity Y 单元数', 1, 4, 1, {
-        visibleWhen: [{ key: 'lockOuterSize', values: [true] }],
-      }),
-      numberField<MemoryCardTrayParams>('heightUnits', '高度单元', '锁定模式下的高度单位', 2, 6, 1, {
-        visibleWhen: [{ key: 'lockOuterSize', values: [true] }],
-      }),
+      booleanField<MemoryCardTrayParams>('lockOuterSize', '固定外部尺寸', '打开后使用你手动指定的外部单元；直接修改下面尺寸也会自动开启'),
+      numberField<MemoryCardTrayParams>('gridX', '宽度单元', '模型占用的 Gridfinity X 单元数；手动修改会自动锁定外部尺寸', 1, 4, 1),
+      numberField<MemoryCardTrayParams>('gridY', '深度单元', '模型占用的 Gridfinity Y 单元数；手动修改会自动锁定外部尺寸', 1, 4, 1),
+      numberField<MemoryCardTrayParams>('heightUnits', '高度单元', '模型高度单位；手动修改会自动锁定外部尺寸', 2, 6, 1),
       numberField<MemoryCardTrayParams>('wallThickness', '壁厚', '高级：建议 >= 1.6mm', 1.2, 3.6, 0.2, {
         section: 'advanced',
       }),

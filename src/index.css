@@ -412,6 +412,58 @@ ul {
   color: var(--ink-soft);
 }
 
+.axis-legend {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 2;
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(4, 14, 22, 0.72);
+  backdrop-filter: blur(10px);
+}
+
+.axis-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.8rem;
+  color: var(--ink);
+}
+
+.axis-legend__item::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.axis-legend__item--x::before {
+  background: #ff5a5f;
+}
+
+.axis-legend__item--y::before {
+  background: #51cf66;
+}
+
+.axis-legend__item--z::before {
+  background: #4dabf7;
+}
+
+.axis-legend__origin {
+  width: 100%;
+  text-align: right;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.72rem;
+  color: var(--ink-soft);
+}
+
 .status-pill {
   padding: 8px 12px;
   color: var(--success);

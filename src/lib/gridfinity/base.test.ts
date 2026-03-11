@@ -1,6 +1,6 @@
 import { booleans, measurements, primitives } from '@jscad/modeling'
 
-import { createBaseBinSolid, getBottomFootLayout } from './base'
+import { createBaseBinSolid, createPocketBetween, getBottomFootLayout } from './base'
 import { defaultGridfinitySpec } from './spec'
 
 const { intersect } = booleans
@@ -99,5 +99,34 @@ describe('gridfinity base geometry', () => {
     expect(shoulderWidth).toBeCloseTo(defaultGridfinitySpec.outerUnitSize, 1)
     expect(footWidth).toBeLessThan(shoulderWidth - 2)
     expect(baseWidth).toBeLessThan(footWidth)
+  })
+
+  it('keeps cavity sidewalls vertical when only planar corner rounding is requested', () => {
+    const pocket = createPocketBetween(20, 12, 0, 10, 0, 0, 2, 24)
+    const lowerSlice = intersect(
+      pocket,
+      cuboid({
+        size: [30, 30, 0.3],
+        center: [0, 0, 0.15],
+      }),
+    )
+    const upperSlice = intersect(
+      pocket,
+      cuboid({
+        size: [30, 30, 0.3],
+        center: [0, 0, 9.85],
+      }),
+    )
+    const [[lowerMinX], [lowerMaxX]] = measureBoundingBox(lowerSlice) as [
+      [number, number, number],
+      [number, number, number],
+    ]
+    const [[upperMinX], [upperMaxX]] = measureBoundingBox(upperSlice) as [
+      [number, number, number],
+      [number, number, number],
+    ]
+
+    expect(lowerMaxX - lowerMinX).toBeCloseTo(20, 1)
+    expect(upperMaxX - upperMinX).toBeCloseTo(20, 1)
   })
 })

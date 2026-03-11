@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { vi } from 'vitest'
 
@@ -43,6 +43,34 @@ describe('GeneratorPage', () => {
     expect(screen.getAllByText('通用收纳盒').length).toBeGreaterThan(0)
     expect(screen.getByText('preview-canvas-mock')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '导出 STL' })).toBeEnabled()
+    expect(screen.getByText('X 内壁厚度')).toBeInTheDocument()
+    expect(screen.getByText('Y 内壁厚度')).toBeInTheDocument()
+    expect(screen.getByText('Z 内壁厚度')).toBeInTheDocument()
+    expect(screen.getByText('隔板厚度')).toBeInTheDocument()
+    expect(screen.getByText('隔板高度')).toBeInTheDocument()
+  })
+
+  it('shows custom divider controls for the generic bin when compartment count increases', () => {
+    render(
+      <MemoryRouter initialEntries={['/generator/generic-bin']}>
+        <Routes>
+          <Route element={<GeneratorPage />} path="/generator/:templateId" />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByText('横向隔板 1 距离')).toBeInTheDocument()
+    expect(screen.queryByText('横向隔板 2 距离')).not.toBeInTheDocument()
+
+    const compartmentLabel = screen.getByText('横向隔仓').closest('label')
+    const compartmentInput = compartmentLabel?.querySelector('input')
+
+    expect(compartmentInput).not.toBeNull()
+    fireEvent.change(compartmentInput as HTMLInputElement, {
+      target: { value: '3' },
+    })
+
+    expect(screen.getByText('横向隔板 2 距离')).toBeInTheDocument()
   })
 
   it('shows the memory card v2 recommendation summary', () => {
@@ -58,5 +86,8 @@ describe('GeneratorPage', () => {
     expect(screen.getByRole('heading', { name: '自动推荐尺寸' })).toBeInTheDocument()
     expect(screen.getByText(/推荐尺寸: 2 x 1 x 2/)).toBeInTheDocument()
     expect(screen.getByText(/总卡数: 12/)).toBeInTheDocument()
+    expect(screen.getByText('宽度单元')).toBeInTheDocument()
+    expect(screen.getByText('深度单元')).toBeInTheDocument()
+    expect(screen.getByText('高度单元')).toBeInTheDocument()
   })
 })

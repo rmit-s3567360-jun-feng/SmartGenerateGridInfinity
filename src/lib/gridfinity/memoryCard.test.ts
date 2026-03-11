@@ -1,5 +1,6 @@
 import {
   getMemoryCardRecommendationSummary,
+  normalizeMemoryCardModeParams,
   resolveMemoryCardPlan,
 } from './memoryCard'
 import { defaultGridfinitySpec } from './spec'
@@ -55,5 +56,23 @@ describe('memory card template v2', () => {
         defaultGridfinitySpec,
       ),
     ).toThrow()
+  })
+
+  it('preserves locked outer size when switching modes', () => {
+    const next = normalizeMemoryCardModeParams(
+      {
+        ...getDefaultMemoryParams(),
+        lockOuterSize: true,
+        gridX: 3,
+        gridY: 2,
+        heightUnits: 4,
+      },
+      'mixed',
+    )
+
+    expect(next.gridX).toBe(3)
+    expect(next.gridY).toBe(2)
+    expect(next.heightUnits).toBe(4)
+    expect(next.mode).toBe('mixed')
   })
 })

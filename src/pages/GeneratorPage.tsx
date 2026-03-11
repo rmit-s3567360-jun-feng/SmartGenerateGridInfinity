@@ -14,14 +14,33 @@ import {
   gridUnitsToMillimeters,
   heightUnitsToMillimeters,
 } from '../lib/gridfinity/spec'
-import { getTemplateDefinition } from '../lib/gridfinity/templates'
+import {
+  getDefaultGenericDividerOffsets,
+  getTemplateDefinition,
+} from '../lib/gridfinity/templates'
 import type {
+  GenericBinParams,
   MemoryCardMode,
   MemoryCardTrayParams,
   ParameterValues,
   TemplateDefinition,
   TemplateId,
 } from '../lib/gridfinity/types'
+
+function getGenericInnerSpan(
+  axis: 'x' | 'y',
+  params: ParameterValues,
+) {
+  const gridUnits =
+    axis === 'x' ? Number(params.gridX ?? 1) : Number(params.gridY ?? 1)
+  const outerSpan = gridUnitsToMillimeters(gridUnits, defaultGridfinitySpec)
+  const innerThickness =
+    axis === 'x'
+      ? Number(params.innerWallThicknessX ?? 2)
+      : Number(params.innerWallThicknessY ?? 2)
+
+  return Math.max(0, outerSpan - innerThickness * 2)
+}
 
 function isTemplateId(value: string | undefined): value is TemplateId {
   return (
@@ -145,6 +164,46 @@ export function GeneratorPage() {
             setRawParams((current) => {
               let next = { ...current, [key]: value }
 
+              if (templateId === 'generic-bin') {
+                if (key === 'compartmentsX') {
+                  const dividerThickness = Number(
+                    (next as GenericBinParams).dividerThickness ?? 2,
+                  )
+                  const [dividerX1, dividerX2, dividerX3] =
+                    getDefaultGenericDividerOffsets(
+                      getGenericInnerSpan('x', next),
+                      dividerThickness,
+                      Number(value),
+                    )
+
+                  next = {
+                    ...(next as GenericBinParams),
+                    dividerX1,
+                    dividerX2,
+                    dividerX3,
+                  }
+                }
+
+                if (key === 'compartmentsY') {
+                  const dividerThickness = Number(
+                    (next as GenericBinParams).dividerThickness ?? 2,
+                  )
+                  const [dividerY1, dividerY2, dividerY3] =
+                    getDefaultGenericDividerOffsets(
+                      getGenericInnerSpan('y', next),
+                      dividerThickness,
+                      Number(value),
+                    )
+
+                  next = {
+                    ...(next as GenericBinParams),
+                    dividerY1,
+                    dividerY2,
+                    dividerY3,
+                  }
+                }
+              }
+
               if (templateId === 'memory-card-tray') {
                 if (key === 'mode' && typeof value === 'string') {
                   next = normalizeMemoryCardModeParams(
@@ -159,6 +218,14 @@ export function GeneratorPage() {
                 ) {
                   next.quantity =
                     Number(next.sdCount ?? 0) + Number(next.microSdCount ?? 0)
+                }
+
+                if (
+                  key === 'gridX' ||
+                  key === 'gridY' ||
+                  key === 'heightUnits'
+                ) {
+                  next.lockOuterSize = true
                 }
 
                 if (key === 'lockOuterSize' && value === true && memoryCardSummary) {

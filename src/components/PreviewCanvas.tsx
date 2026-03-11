@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import {
   AmbientLight,
+  AxesHelper,
   Box3,
   BufferAttribute,
   BufferGeometry,
@@ -33,6 +34,8 @@ export function PreviewCanvas({
   const containerRef = useRef<HTMLDivElement | null>(null)
   const cameraRef = useRef<PerspectiveCamera | null>(null)
   const controlsRef = useRef<OrbitControls | null>(null)
+  const axesRef = useRef<AxesHelper | null>(null)
+  const modelGroupRef = useRef<Group | null>(null)
   const meshRef = useRef<Mesh | null>(null)
 
   useEffect(() => {
@@ -66,6 +69,22 @@ export function PreviewCanvas({
     grid.rotateX(Math.PI / 2)
     world.add(grid)
 
+    const axes = new AxesHelper(1)
+    axes.renderOrder = 2
+    if (Array.isArray(axes.material)) {
+      axes.material.forEach((material) => {
+        material.depthTest = false
+      })
+    } else {
+      axes.material.depthTest = false
+    }
+    world.add(axes)
+    axesRef.current = axes
+
+    const modelGroup = new Group()
+    world.add(modelGroup)
+    modelGroupRef.current = modelGroup
+
     const mesh = new Mesh(
       new BufferGeometry(),
       new MeshStandardMaterial({
@@ -74,7 +93,7 @@ export function PreviewCanvas({
         roughness: 0.64,
       }),
     )
-    world.add(mesh)
+    modelGroup.add(mesh)
     meshRef.current = mesh
 
     const ambientLight = new AmbientLight('#d2ecff', 1.7)
@@ -111,6 +130,12 @@ export function PreviewCanvas({
       window.cancelAnimationFrame(frameId)
       observer.disconnect()
       controls.dispose()
+      axes.geometry.dispose()
+      if (Array.isArray(axes.material)) {
+        axes.material.forEach((material) => material.dispose())
+      } else {
+        axes.material.dispose()
+      }
       mesh.geometry.dispose()
       ;(mesh.material as MeshStandardMaterial).dispose()
       renderer.dispose()
@@ -122,8 +147,10 @@ export function PreviewCanvas({
     const mesh = meshRef.current
     const camera = cameraRef.current
     const controls = controlsRef.current
+    const axes = axesRef.current
+    const modelGroup = modelGroupRef.current
 
-    if (!mesh || !camera || !controls) {
+    if (!mesh || !camera || !controls || !axes || !modelGroup) {
       return
     }
 
@@ -138,17 +165,30 @@ export function PreviewCanvas({
     mesh.geometry = nextGeometry
 
     if (!bounds) {
+      modelGroup.position.set(0, 0, 0)
+      axes.scale.setScalar(24)
       return
     }
 
+    const originOffset = new Vector3(
+      -bounds.min[0],
+      -bounds.min[1],
+      -bounds.min[2],
+    )
+    modelGroup.position.copy(originOffset)
+
     const box = new Box3(
-      new Vector3(...bounds.min),
-      new Vector3(...bounds.max),
+      new Vector3(0, 0, 0),
+      new Vector3(...bounds.size),
     )
     const center = box.getCenter(new Vector3())
     const size = box.getSize(new Vector3())
     const maxDim = Math.max(size.x, size.y, size.z, 18)
     const distance = maxDim * 2
+    const axisLength = Math.max(maxDim * 0.75, 24)
+
+    axes.position.set(0, 0, 0)
+    axes.scale.setScalar(axisLength)
 
     controls.target.copy(center)
     camera.position.set(
@@ -172,6 +212,12 @@ export function PreviewCanvas({
         {isLoading ? <span className="status-pill">生成中...</span> : null}
       </div>
       <div className="preview-canvas" ref={containerRef}>
+        <div className="axis-legend" aria-label="坐标轴图例">
+          <span className="axis-legend__item axis-legend__item--x">X</span>
+          <span className="axis-legend__item axis-legend__item--y">Y</span>
+          <span className="axis-legend__item axis-legend__item--z">Z</span>
+          <span className="axis-legend__origin">原点: 外轮廓角点</span>
+        </div>
         {!positions ? (
           <div className="preview-placeholder">等待有效参数后生成预览</div>
         ) : null}

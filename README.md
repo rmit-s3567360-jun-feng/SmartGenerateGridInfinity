@@ -13,6 +13,10 @@
 
 [`docs/DEVELOPMENT_CONTEXT.md`](./docs/DEVELOPMENT_CONTEXT.md)
 
+所有未完成、已确认方向的需求统一维护在：
+
+[`docs/OPEN_REQUIREMENTS.md`](./docs/OPEN_REQUIREMENTS.md)
+
 下一阶段需求细化与任务拆分见：
 
 - [`docs/NEXT_PHASE_SPEC.md`](./docs/NEXT_PHASE_SPEC.md)

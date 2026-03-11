@@ -4,8 +4,14 @@
 
 补充规格文档：
 
+- `docs/OPEN_REQUIREMENTS.md`
 - `docs/NEXT_PHASE_SPEC.md`
 - `docs/TASK_BREAKDOWN.md`
+
+说明：
+
+- 当前代码基线和交接提醒继续维护在本文件
+- 所有未完成、已确认方向的需求统一维护在 `docs/OPEN_REQUIREMENTS.md`
 
 ## 1. 项目定位
 

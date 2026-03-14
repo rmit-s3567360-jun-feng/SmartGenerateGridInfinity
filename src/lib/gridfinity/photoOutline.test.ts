@@ -8,8 +8,6 @@ import {
 import { defaultGridfinitySpec } from './spec'
 import { templateDefinitions } from './templates'
 import type {
-  PhotoBounds,
-  PhotoOutlineAnalysis,
   PhotoOutlineBinParams,
   PhotoPoint,
 } from './types'
@@ -20,6 +18,7 @@ describe('photo outline helpers', () => {
     const analysis = detectPhotoOutlineFromRaster(raster, {
       foregroundThreshold: 36,
       simplifyTolerance: 2.5,
+      contourMode: 'smooth',
     })
 
     expect(analysis.status).toBe('ready')
@@ -31,11 +30,56 @@ describe('photo outline helpers', () => {
     expect(analysis.contour?.heightMm).toBeGreaterThan(20)
   })
 
+  it('detects a brown ruler on a light background', () => {
+    const raster = createSyntheticRaster([124, 88, 58])
+    const analysis = detectPhotoOutlineFromRaster(raster, {
+      foregroundThreshold: 36,
+      simplifyTolerance: 2.5,
+      contourMode: 'smooth',
+    })
+
+    expect(analysis.status).toBe('ready')
+    expect(analysis.ruler.status).toBe('detected')
+    expect(analysis.ruler.corner).toBe('bottom-left')
+  })
+
+  it('detects a white object on a light background when the ruler is present', () => {
+    const raster = createWhiteObjectRaster()
+    const analysis = detectPhotoOutlineFromRaster(raster, {
+      foregroundThreshold: 36,
+      simplifyTolerance: 2.5,
+      contourMode: 'smooth',
+    })
+
+    expect(analysis.status).toBe('ready')
+    expect(analysis.ruler.status).toBe('detected')
+    expect(analysis.contour?.widthMm).toBeGreaterThan(20)
+    expect(analysis.contour?.heightMm).toBeGreaterThan(24)
+  })
+
+  it('extracts the outer silhouette instead of internal logo edges', () => {
+    const raster = createLowContrastLogoRaster()
+    const analysis = detectPhotoOutlineFromRaster(raster, {
+      foregroundThreshold: 36,
+      simplifyTolerance: 2.8,
+      contourMode: 'smooth',
+    })
+
+    expect(analysis.status).toBe('ready')
+    expect(analysis.ruler.status).toBe('detected')
+    expect(analysis.contour?.boundsPx.minX).toBeLessThanOrEqual(79)
+    expect(analysis.contour?.boundsPx.maxX).toBeGreaterThanOrEqual(147)
+    expect(analysis.contour?.boundsPx.minY).toBeLessThanOrEqual(77)
+    expect(analysis.contour?.boundsPx.maxY).toBeGreaterThanOrEqual(149)
+    expect(analysis.contour?.pointsPx.length).toBeLessThanOrEqual(12)
+  })
+
   it('returns a missing-ruler error when the image only contains an object', () => {
     const raster = createObjectOnlyRaster()
     const analysis = detectPhotoOutlineFromRaster(raster, {
       foregroundThreshold: 36,
       simplifyTolerance: 2.5,
+      contourMode: 'smooth',
     })
 
     expect(analysis.status).toBe('error')
@@ -57,30 +101,30 @@ describe('photo outline helpers', () => {
     expect(summary.pointCount).toBeGreaterThanOrEqual(4)
   })
 
-  it('prefers a single right-side grip when double-sided reserve does not fit', () => {
+  it('accepts thin objects below 4mm', () => {
     const template = templateDefinitions['photo-outline-bin']
     const params: PhotoOutlineBinParams = {
       ...(template.defaultParams as PhotoOutlineBinParams),
-      analysis: createManualAnalysis(
-        [
-          { x: 80, y: 42 },
-          { x: 124, y: 36 },
-          { x: 168, y: 46 },
-          { x: 178, y: 82 },
-          { x: 160, y: 112 },
-          { x: 116, y: 118 },
-          { x: 90, y: 82 },
-        ],
-        0.5,
-      ),
-      gripMode: 'auto-side',
+      objectHeight: 1,
+      analysis: createPhotoOutlineFixtureAnalysis(),
     }
 
-    const plan = resolvePhotoOutlinePlan(params, defaultGridfinitySpec)
+    expect(template.schema.safeParse(params).success).toBe(true)
+    expect(() => resolvePhotoOutlinePlan(params, defaultGridfinitySpec)).not.toThrow()
+  })
 
-    expect(plan.size.gridX).toBe(2)
-    expect(plan.gripSides).toEqual(['right'])
-    expect(plan.gripLabel).toContain('单侧双层')
+  it('offers a rounded envelope mode for easier editing', () => {
+    const raster = createWhiteObjectRaster()
+    const analysis = detectPhotoOutlineFromRaster(raster, {
+      foregroundThreshold: 36,
+      simplifyTolerance: 2.5,
+      contourMode: 'rounded',
+    })
+
+    expect(analysis.status).toBe('ready')
+    expect(analysis.contour?.pointsPx).toHaveLength(8)
+    expect(analysis.contour?.widthMm).toBeGreaterThan(20)
+    expect(analysis.contour?.heightMm).toBeGreaterThan(24)
   })
 
   it('keeps point order and count stable while editing', () => {
@@ -98,14 +142,14 @@ describe('photo outline helpers', () => {
   })
 })
 
-function createSyntheticRaster() {
+function createSyntheticRaster(rulerColor: readonly [number, number, number] = [15, 18, 20]) {
   const width = 160
   const height = 120
   const data = new Uint8ClampedArray(width * height * 4)
 
   fillRect(data, width, height, 0, 0, width, height, [248, 248, 244])
-  fillRect(data, width, height, 10, 86, 48, 92, [15, 18, 20])
-  fillRect(data, width, height, 10, 48, 16, 92, [15, 18, 20])
+  fillRect(data, width, height, 10, 86, 48, 92, rulerColor)
+  fillRect(data, width, height, 10, 48, 16, 92, rulerColor)
   fillPolygon(
     data,
     width,
@@ -148,6 +192,51 @@ function createObjectOnlyRaster() {
   }
 }
 
+function createWhiteObjectRaster() {
+  const width = 220
+  const height = 280
+  const data = new Uint8ClampedArray(width * height * 4)
+
+  fillRect(data, width, height, 0, 0, width, height, [244, 241, 232])
+  fillRect(data, width, height, 18, 252, 98, 262, [18, 18, 18])
+  fillRect(data, width, height, 18, 202, 28, 262, [18, 18, 18])
+  fillRoundedRect(data, width, height, 74, 72, 146, 146, 16, [224, 220, 212])
+  fillRoundedRect(data, width, height, 78, 68, 150, 142, 16, [251, 248, 242])
+  fillRoundedRect(data, width, height, 95, 84, 106, 125, 3, [221, 217, 210])
+  fillRoundedRect(data, width, height, 120, 96, 129, 105, 4, [229, 225, 218])
+
+  return {
+    data,
+    width,
+    height,
+    name: 'white-object.png',
+  }
+}
+
+function createLowContrastLogoRaster() {
+  const width = 220
+  const height = 280
+  const data = new Uint8ClampedArray(width * height * 4)
+
+  fillRect(data, width, height, 0, 0, width, height, [244, 241, 232])
+  fillRect(data, width, height, 18, 252, 98, 262, [18, 18, 18])
+  fillRect(data, width, height, 18, 202, 28, 262, [18, 18, 18])
+  fillRoundedRect(data, width, height, 74, 72, 154, 152, 18, [232, 228, 220])
+  fillRoundedRect(data, width, height, 78, 76, 150, 148, 18, [248, 246, 239])
+  fillRect(data, width, height, 92, 94, 104, 132, [82, 78, 70])
+  fillRect(data, width, height, 122, 94, 134, 132, [82, 78, 70])
+  fillRect(data, width, height, 100, 106, 126, 118, [82, 78, 70])
+  fillRoundedRect(data, width, height, 108, 122, 136, 140, 6, [214, 176, 84])
+  fillRoundedRect(data, width, height, 166, 92, 182, 108, 4, [88, 82, 74])
+
+  return {
+    data,
+    width,
+    height,
+    name: 'low-contrast-logo-object.png',
+  }
+}
+
 function fillRect(
   data: Uint8ClampedArray,
   width: number,
@@ -186,6 +275,41 @@ function fillPolygon(
   }
 }
 
+function fillRoundedRect(
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+  minX: number,
+  minY: number,
+  maxX: number,
+  maxY: number,
+  radius: number,
+  color: readonly [number, number, number],
+) {
+  for (let y = minY; y < maxY && y < height; y += 1) {
+    for (let x = minX; x < maxX && x < width; x += 1) {
+      if (isPointInRoundedRect(x + 0.5, y + 0.5, minX, minY, maxX, maxY, radius)) {
+        setPixel(data, width, x, y, color)
+      }
+    }
+  }
+}
+
+function isPointInRoundedRect(
+  x: number,
+  y: number,
+  minX: number,
+  minY: number,
+  maxX: number,
+  maxY: number,
+  radius: number,
+) {
+  const clampedX = Math.max(minX + radius, Math.min(x, maxX - radius))
+  const clampedY = Math.max(minY + radius, Math.min(y, maxY - radius))
+
+  return (x - clampedX) ** 2 + (y - clampedY) ** 2 <= radius ** 2
+}
+
 function isPointInPolygon(x: number, y: number, polygon: PhotoPoint[]) {
   let inside = false
 
@@ -219,79 +343,4 @@ function setPixel(
   data[offset + 1] = g
   data[offset + 2] = b
   data[offset + 3] = 255
-}
-
-function createManualAnalysis(pointsPx: PhotoPoint[], mmPerPixel: number): PhotoOutlineAnalysis {
-  const boundsPx = getBounds(pointsPx)
-  const centerX = (boundsPx.minX + boundsPx.maxX) / 2
-  const centerY = (boundsPx.minY + boundsPx.maxY) / 2
-  const pointsMm = pointsPx.map(({ x, y }) => ({
-    x: Number(((x - centerX) * mmPerPixel).toFixed(3)),
-    y: Number(((centerY - y) * mmPerPixel).toFixed(3)),
-  }))
-  const boundsMm = getBounds(pointsMm)
-
-  return {
-    status: 'ready',
-    message: null,
-    source: {
-      name: 'manual-fixture.png',
-      width: 240,
-      height: 180,
-    },
-    ruler: {
-      status: 'detected',
-      corner: 'bottom-left',
-      confidence: 0.92,
-      mmPerPixel,
-      knownWidthMm: 80,
-      knownHeightMm: 60,
-      barThicknessPx: 6,
-      boundsPx: getBounds([
-        { x: 8, y: 112 },
-        { x: 88, y: 172 },
-      ]),
-    },
-    contour: {
-      pointsPx,
-      pointsMm,
-      boundsPx,
-      boundsMm,
-      widthMm: Number(boundsMm.width.toFixed(2)),
-      heightMm: Number(boundsMm.height.toFixed(2)),
-      areaMm2: Number(Math.abs(polygonArea(pointsMm)).toFixed(2)),
-    },
-    detection: {
-      foregroundThreshold: 36,
-      simplifyTolerance: 2.5,
-    },
-  }
-}
-
-function getBounds(points: PhotoPoint[]): PhotoBounds {
-  const minX = Math.min(...points.map((point) => point.x))
-  const minY = Math.min(...points.map((point) => point.y))
-  const maxX = Math.max(...points.map((point) => point.x))
-  const maxY = Math.max(...points.map((point) => point.y))
-
-  return {
-    minX,
-    minY,
-    maxX,
-    maxY,
-    width: maxX - minX,
-    height: maxY - minY,
-  }
-}
-
-function polygonArea(points: PhotoPoint[]) {
-  let area = 0
-
-  for (let index = 0; index < points.length; index += 1) {
-    const current = points[index]
-    const next = points[(index + 1) % points.length]
-    area += current.x * next.y - next.x * current.y
-  }
-
-  return area / 2
 }

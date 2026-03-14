@@ -134,7 +134,8 @@ ul {
 .hero__copy,
 .generator-header p,
 .section-heading p,
-.panel__body {
+.panel__body,
+.panel__hint {
   color: var(--ink-soft);
   font-size: 1.02rem;
 }
@@ -332,8 +333,25 @@ ul {
   align-items: start;
 }
 
-.photo-workspace .preview-shell {
-  grid-column: 1 / -1;
+.photo-results-column {
+  min-width: 0;
+  display: grid;
+  gap: 18px;
+}
+
+.photo-control-panel {
+  position: sticky;
+  top: 18px;
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+}
+
+.photo-results-column .preview-shell {
+  min-height: 440px;
+}
+
+.photo-results-column .preview-canvas {
+  min-height: 360px;
 }
 
 .panel,
@@ -350,14 +368,52 @@ ul {
   justify-content: space-between;
 }
 
+.preview-shell__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
 .form-grid {
   display: grid;
   gap: 14px;
   margin-top: 18px;
 }
 
+.form-grid--compact {
+  margin-top: 0;
+}
+
+.photo-advanced-panel {
+  margin-top: 18px;
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.photo-advanced-panel summary {
+  cursor: pointer;
+  list-style: none;
+  font-weight: 700;
+}
+
+.photo-advanced-panel summary::-webkit-details-marker {
+  display: none;
+}
+
+.photo-advanced-panel[open] summary {
+  margin-bottom: 12px;
+}
+
 .advanced-toggle {
   margin-top: 18px;
+}
+
+.panel__hint {
+  margin-top: 10px;
 }
 
 .form-field,
@@ -366,9 +422,29 @@ ul {
   gap: 6px;
 }
 
+.form-field--number {
+  gap: 10px;
+}
+
+.form-field__top {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .form-field span,
 .toggle-field span {
   font-weight: 700;
+}
+
+.value-chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(244, 179, 90, 0.14);
+  color: var(--accent-strong);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.78rem;
 }
 
 .form-field input,
@@ -380,6 +456,29 @@ ul {
   border-radius: 14px;
   background: rgba(3, 11, 18, 0.46);
   color: var(--ink);
+}
+
+.number-control {
+  display: grid;
+  gap: 10px;
+}
+
+.number-control__slider {
+  width: 100%;
+  min-height: auto;
+  padding: 0;
+  border: none;
+  background: transparent;
+  accent-color: var(--accent);
+}
+
+.number-control__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--ink-soft);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.72rem;
 }
 
 .toggle-field {
@@ -424,6 +523,12 @@ ul {
   margin-top: 18px;
   display: grid;
   gap: 8px;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .photo-ruler-download p {
@@ -544,6 +649,14 @@ ul {
     linear-gradient(180deg, #06101a 0%, #0d1f2c 100%);
 }
 
+.photo-results-column .preview-shell {
+  min-height: 440px;
+}
+
+.photo-results-column .preview-canvas {
+  min-height: 360px;
+}
+
 .preview-canvas canvas {
   display: block;
   width: 100%;
@@ -615,6 +728,15 @@ ul {
   color: var(--success);
 }
 
+.status-pill--pending {
+  color: var(--warning);
+}
+
+.preview-reset-button {
+  min-height: 40px;
+  padding: 0 14px;
+}
+
 .stats-grid {
   display: grid;
   gap: 12px;
@@ -669,6 +791,12 @@ ul {
 
   .preview-canvas {
     min-height: 480px;
+  }
+
+  .photo-control-panel {
+    position: static;
+    max-height: none;
+    overflow: visible;
   }
 }
 

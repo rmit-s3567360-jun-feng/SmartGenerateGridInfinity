@@ -3,6 +3,9 @@ import { useEffect, useEffectEvent, useRef, useState } from 'react'
 
 import {
   detectPhotoOutlineFromRaster,
+  PHOTO_OUTLINE_A4_SHEET_DOWNLOAD_PATH,
+  PHOTO_OUTLINE_A4_SHEET_HEIGHT_MM,
+  PHOTO_OUTLINE_A4_SHEET_WIDTH_MM,
   PHOTO_OUTLINE_RULER_BAR_WIDTH_MM,
   PHOTO_OUTLINE_RULER_DOWNLOAD_PATH,
   PHOTO_OUTLINE_RULER_HEIGHT_MM,
@@ -13,9 +16,11 @@ import {
 import type {
   GenerationResult,
   JsonValue,
+  PhotoContourMode,
   PhotoOutlineBinParams,
   PhotoPoint,
 } from '../lib/gridfinity/types'
+import { NumericFieldControl } from './NumericFieldControl'
 import { PreviewCanvas } from './PreviewCanvas'
 
 interface UploadedRaster {
@@ -31,6 +36,7 @@ interface PhotoOutlineWorkflowProps {
   validationErrors: string[]
   generation: GenerationResult | null
   isGenerating: boolean
+  isPreviewPending: boolean
   onChange: (key: string, value: JsonValue) => void
   onReset: () => void
 }
@@ -40,41 +46,22 @@ export function PhotoOutlineWorkflow({
   validationErrors,
   generation,
   isGenerating,
+  isPreviewPending,
   onChange,
   onReset,
 }: PhotoOutlineWorkflowProps) {
   const [uploadedRaster, setUploadedRaster] = useState<UploadedRaster | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [dragIndex, setDragIndex] = useState<number | null>(null)
+  const [reviewOriginPx, setReviewOriginPx] = useState<PhotoPoint | null>(null)
   const svgRef = useRef<SVGSVGElement | null>(null)
-  const emitAnalysis = useEffectEvent((value: JsonValue) => {
+  const emitAnalysisInEffect = useEffectEvent((value: JsonValue) => {
     onChange('analysis', value)
   })
   const blockingErrors = validationErrors.filter(
     (error) => error !== '请先上传图片并完成轮廓识别。',
   )
   const contour = values.analysis?.status === 'ready' ? values.analysis.contour : null
-
-  useEffect(() => {
-    if (!uploadedRaster) {
-      return
-    }
-
-    const nextAnalysis = detectPhotoOutlineFromRaster(
-      {
-        data: uploadedRaster.data,
-        width: uploadedRaster.width,
-        height: uploadedRaster.height,
-        name: uploadedRaster.name,
-      },
-      {
-        foregroundThreshold: values.foregroundThreshold,
-        simplifyTolerance: values.simplifyTolerance,
-      },
-    )
-
-    emitAnalysis(nextAnalysis)
-  }, [uploadedRaster, values.foregroundThreshold, values.simplifyTolerance])
 
   useEffect(() => {
     const activeRaster = uploadedRaster
@@ -106,7 +93,7 @@ export function PhotoOutlineWorkflow({
       const nextPoints = contourPoints.map((point, index) =>
         index === dragIndex ? nextPoint : point,
       )
-      emitAnalysis(updatePhotoOutlineEditedPoints(analysis, nextPoints))
+      emitAnalysisInEffect(updatePhotoOutlineEditedPoints(analysis, nextPoints))
     }
 
     function handlePointerUp() {
@@ -122,6 +109,40 @@ export function PhotoOutlineWorkflow({
     }
   }, [contour, dragIndex, uploadedRaster, values.analysis])
 
+  function rerunAnalysis(
+    raster: UploadedRaster,
+    overrides: Partial<
+      Pick<PhotoOutlineBinParams, 'foregroundThreshold' | 'simplifyTolerance' | 'contourMode'>
+    > = {},
+  ) {
+    return detectPhotoOutlineFromRaster(
+      {
+        data: raster.data,
+        width: raster.width,
+        height: raster.height,
+        name: raster.name,
+      },
+      {
+        foregroundThreshold:
+          overrides.foregroundThreshold ?? values.foregroundThreshold,
+        simplifyTolerance: overrides.simplifyTolerance ?? values.simplifyTolerance,
+        contourMode: overrides.contourMode ?? values.contourMode,
+      },
+    )
+  }
+
+  function commitAnalysis(nextAnalysis: PhotoOutlineBinParams['analysis']) {
+    setReviewOriginPx(
+      nextAnalysis?.status === 'ready' && nextAnalysis.contour
+        ? {
+            x: nextAnalysis.contour.boundsPx.minX,
+            y: nextAnalysis.contour.boundsPx.maxY,
+          }
+        : null,
+    )
+    onChange('analysis', nextAnalysis)
+  }
+
   async function handleFileSelect(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
 
@@ -131,33 +152,61 @@ export function PhotoOutlineWorkflow({
 
     try {
       const raster = await loadRasterFromFile(file)
+      const nextAnalysis = rerunAnalysis(raster)
       setUploadedRaster(raster)
       setUploadError(null)
-      onChange('analysis', null)
+      commitAnalysis(nextAnalysis)
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : '读取图片失败。')
       setUploadedRaster(null)
+      setReviewOriginPx(null)
       onChange('analysis', null)
     }
+  }
+
+  function handleDetectionParamChange(
+    key: 'foregroundThreshold' | 'simplifyTolerance' | 'contourMode',
+    value: number | string | PhotoContourMode,
+  ) {
+    const normalizedValue =
+      key === 'contourMode' ? value : normalizeNumberControlValue(value)
+
+    onChange(key, normalizedValue)
+
+    if (!uploadedRaster || typeof normalizedValue !== 'number') {
+      return
+    }
+
+    const nextAnalysis = rerunAnalysis(uploadedRaster, { [key]: normalizedValue })
+    commitAnalysis(nextAnalysis)
   }
 
   function handleReset() {
     setUploadedRaster(null)
     setUploadError(null)
     setDragIndex(null)
+    setReviewOriginPx(null)
     onReset()
   }
 
+  const pointOriginPx = reviewOriginPx
+    ? reviewOriginPx
+    : contour
+      ? { x: contour.boundsPx.minX, y: contour.boundsPx.maxY }
+      : null
+  const pointScale = values.analysis?.ruler.mmPerPixel ?? 0
   const pointRows =
-    contour?.pointsMm.map((point, index) => ({
-      index: index + 1,
-      x: point.x - contour.boundsMm.minX,
-      y: contour.boundsMm.maxY - point.y,
-    })) ?? []
+    contour && pointOriginPx
+      ? contour.pointsPx.map((point, index) => ({
+          index: index + 1,
+          x: (point.x - pointOriginPx.x) * pointScale,
+          y: (pointOriginPx.y - point.y) * pointScale,
+        }))
+      : []
 
   return (
     <div className="photo-workspace">
-      <section className="panel">
+      <section className="panel photo-control-panel">
         <div className="panel__header">
           <div>
             <p className="panel__eyebrow">识别流程</p>
@@ -171,16 +220,29 @@ export function PhotoOutlineWorkflow({
           上传单张俯拍照片后，系统会先识别 L 形标尺，再抽取关键点轮廓。拖拽橙色节点即可修正首版轮廓。
         </p>
         <div className="photo-ruler-download">
-          <a
-            className="button button--ghost"
-            download
-            href={PHOTO_OUTLINE_RULER_DOWNLOAD_PATH}
-          >
-            下载 L 形标尺 STL
-          </a>
+          <div className="button-row">
+            <a
+              className="button button--ghost"
+              download
+              href={PHOTO_OUTLINE_RULER_DOWNLOAD_PATH}
+            >
+              下载 L 形标尺 STL
+            </a>
+            <a
+              className="button button--ghost"
+              download
+              href={PHOTO_OUTLINE_A4_SHEET_DOWNLOAD_PATH}
+            >
+              下载 A4 校准底纸 SVG
+            </a>
+          </div>
           <p>
             标尺外框 {PHOTO_OUTLINE_RULER_WIDTH_MM} x {PHOTO_OUTLINE_RULER_HEIGHT_MM} mm，臂宽{' '}
             {PHOTO_OUTLINE_RULER_BAR_WIDTH_MM} mm，厚 {PHOTO_OUTLINE_RULER_THICKNESS_MM} mm。
+          </p>
+          <p>
+            A4 底纸尺寸 {PHOTO_OUTLINE_A4_SHEET_WIDTH_MM} x {PHOTO_OUTLINE_A4_SHEET_HEIGHT_MM}{' '}
+            mm，内含同规格 L 标尺和低干扰定位角标；当前 V1 识别仍只使用内嵌 L 标尺。
           </p>
         </div>
 
@@ -204,7 +266,7 @@ export function PhotoOutlineWorkflow({
 
         <label className="photo-upload-box">
           <span>上传俯拍照片</span>
-          <small>建议把目标物与黑色 L 形标尺放在同一平面，背景尽量干净。</small>
+          <small>建议把目标物与深色 L 形标尺放在同一平面，背景尽量干净。</small>
           <input accept="image/*" type="file" onChange={handleFileSelect} />
         </label>
 
@@ -224,124 +286,106 @@ export function PhotoOutlineWorkflow({
         ) : null}
 
         <div className="form-grid">
-          <label className="form-field">
-            <span>物体高度</span>
-            <small>照片只负责 XY 轮廓，高度仍需手工输入。</small>
-            <input
-              max={84}
-              min={4}
-              step={0.5}
-              type="number"
-              value={String(values.objectHeight)}
-              onChange={(event) => onChange('objectHeight', Number(event.target.value))}
-            />
-          </label>
+          <NumericFieldControl
+            description="照片只负责 XY 轮廓，高度仍需手工输入。"
+            label="物体高度"
+            max={84}
+            min={0.5}
+            step={0.1}
+            value={values.objectHeight}
+            onChange={(value) => onChange('objectHeight', normalizeNumberControlValue(value))}
+          />
+
+          <NumericFieldControl
+            description="给型腔四周增加的装配余量。"
+            label="轮廓余量"
+            max={4}
+            min={0.3}
+            step={0.1}
+            value={values.cavityClearance}
+            onChange={(value) =>
+              onChange('cavityClearance', normalizeNumberControlValue(value))
+            }
+          />
+
+          <NumericFieldControl
+            description="在物体高度基础上额外预留的深度。"
+            label="深度余量"
+            max={8}
+            min={0}
+            step={0.1}
+            value={values.depthClearance}
+            onChange={(value) =>
+              onChange('depthClearance', normalizeNumberControlValue(value))
+            }
+          />
 
           <label className="form-field">
-            <span>轮廓余量</span>
-            <small>给型腔四周增加的装配余量。</small>
-            <input
-              max={4}
-              min={0.3}
-              step={0.1}
-              type="number"
-              value={String(values.cavityClearance)}
-              onChange={(event) => onChange('cavityClearance', Number(event.target.value))}
-            />
-          </label>
-
-          <label className="form-field">
-            <span>深度余量</span>
-            <small>在物体高度基础上额外预留的深度。</small>
-            <input
-              max={8}
-              min={0}
-              step={0.1}
-              type="number"
-              value={String(values.depthClearance)}
-              onChange={(event) => onChange('depthClearance', Number(event.target.value))}
-            />
-          </label>
-
-          <label className="form-field">
-            <span>取物凹槽</span>
-            <small>支持双侧双层、单侧双层和自动侧选择。</small>
+            <span>轮廓模式</span>
+            <small>平滑轮廓更抗表面图案，圆角包络更适合圆角小外壳。</small>
             <select
-              value={values.gripMode}
-              onChange={(event) => onChange('gripMode', event.target.value)}
+              value={values.contourMode}
+              onChange={(event) =>
+                handleDetectionParamChange(
+                  'contourMode',
+                  event.target.value as PhotoContourMode,
+                )
+              }
             >
-              <option value="double-sided">双侧双层</option>
-              <option value="single-sided">单侧双层</option>
-              <option value="auto-side">自动侧选择</option>
+              <option value="smooth">平滑轮廓</option>
+              <option value="detail">保留细节</option>
+              <option value="rounded">圆角包络</option>
             </select>
           </label>
 
-          {values.gripMode === 'single-sided' ? (
-            <label className="form-field">
-              <span>单侧方向</span>
-              <small>单侧双层模式下生效。</small>
-              <select
-                value={values.singleGripSide}
-                onChange={(event) => onChange('singleGripSide', event.target.value)}
-              >
-                <option value="left">左侧</option>
-                <option value="right">右侧</option>
-              </select>
-            </label>
-          ) : null}
+          <NumericFieldControl
+            description="控制外壳强度。"
+            label="壁厚"
+            max={3.6}
+            min={1.2}
+            step={0.1}
+            value={values.wallThickness}
+            onChange={(value) => onChange('wallThickness', normalizeNumberControlValue(value))}
+          />
 
-          <label className="form-field">
-            <span>识别阈值</span>
-            <small>调高可减少浅色背景干扰，调低可保留更多边缘。</small>
-            <input
+          <NumericFieldControl
+            description="保留在型腔底部的结构厚度。"
+            label="底厚"
+            max={5}
+            min={1.2}
+            step={0.1}
+            value={values.floorThickness}
+            onChange={(value) => onChange('floorThickness', normalizeNumberControlValue(value))}
+          />
+        </div>
+
+        <details className="photo-advanced-panel">
+          <summary>识别调节</summary>
+          <p className="panel__body">
+            白色物体、复杂背景或表面图案干扰时，再调这里。
+          </p>
+          <div className="form-grid form-grid--compact">
+            <NumericFieldControl
+              description="调高可减少浅色背景干扰，调低可保留更多边缘。"
+              label="识别阈值"
               max={180}
               min={10}
               step={1}
-              type="number"
-              value={String(values.foregroundThreshold)}
-              onChange={(event) => onChange('foregroundThreshold', Number(event.target.value))}
+              value={values.foregroundThreshold}
+              onChange={(value) => handleDetectionParamChange('foregroundThreshold', value)}
             />
-          </label>
 
-          <label className="form-field">
-            <span>关键点简化</span>
-            <small>值越大，轮廓点越少，适合先做粗修。</small>
-            <input
+            <NumericFieldControl
+              description="值越大，轮廓点越少；配合轮廓模式一起调。"
+              label="关键点简化"
               max={18}
               min={0.5}
               step={0.1}
-              type="number"
-              value={String(values.simplifyTolerance)}
-              onChange={(event) => onChange('simplifyTolerance', Number(event.target.value))}
+              value={values.simplifyTolerance}
+              onChange={(value) => handleDetectionParamChange('simplifyTolerance', value)}
             />
-          </label>
-
-          <label className="form-field">
-            <span>壁厚</span>
-            <small>控制外壳强度。</small>
-            <input
-              max={3.6}
-              min={1.2}
-              step={0.1}
-              type="number"
-              value={String(values.wallThickness)}
-              onChange={(event) => onChange('wallThickness', Number(event.target.value))}
-            />
-          </label>
-
-          <label className="form-field">
-            <span>底厚</span>
-            <small>保留在型腔底部的结构厚度。</small>
-            <input
-              max={5}
-              min={1.2}
-              step={0.1}
-              type="number"
-              value={String(values.floorThickness)}
-              onChange={(event) => onChange('floorThickness', Number(event.target.value))}
-            />
-          </label>
-        </div>
+          </div>
+        </details>
 
         <label className="toggle-field">
           <div>
@@ -356,128 +400,146 @@ export function PhotoOutlineWorkflow({
         </label>
       </section>
 
-      <section className="panel photo-review-panel">
-        <div className="panel__header">
-          <div>
-            <p className="panel__eyebrow">轮廓审查</p>
-            <h2>图像叠加</h2>
+      <div className="photo-results-column">
+        <PreviewCanvas
+          bounds={generation?.bounds ?? null}
+          isLoading={isGenerating}
+          isPending={isPreviewPending}
+          positions={generation?.meshData.positions ?? null}
+        />
+
+        <section className="panel photo-review-panel">
+          <div className="panel__header">
+            <div>
+              <p className="panel__eyebrow">轮廓审查</p>
+              <h2>图像叠加</h2>
+            </div>
           </div>
-        </div>
-        <p className="panel__body">
-          审查项会叠加在原图上。拖拽关键点时，右下角 3D 预览会自动刷新。
-        </p>
+          <p className="panel__body">
+            审查项会叠加在原图上。拖拽关键点时，右上角 3D 预览会自动刷新。
+          </p>
 
-        {!uploadedRaster ? (
-          <div className="photo-empty-state">
-            先上传一张带 L 形标尺的俯拍照片，系统会在这里显示叠加结果。
-          </div>
-        ) : (
-          <div
-            className="photo-review-stage"
-            style={{ aspectRatio: `${uploadedRaster.width} / ${uploadedRaster.height}` }}
-          >
-            <svg
-              className="photo-review-svg"
-              ref={svgRef}
-              viewBox={`0 0 ${uploadedRaster.width} ${uploadedRaster.height}`}
-            >
-              <image
-                height={uploadedRaster.height}
-                href={uploadedRaster.dataUrl}
-                width={uploadedRaster.width}
-                x={0}
-                y={0}
-              />
-
-              {values.analysis?.ruler.boundsPx ? (
-                <rect
-                  className="photo-ruler-box"
-                  height={values.analysis.ruler.boundsPx.height}
-                  width={values.analysis.ruler.boundsPx.width}
-                  x={values.analysis.ruler.boundsPx.minX}
-                  y={values.analysis.ruler.boundsPx.minY}
-                />
-              ) : null}
-
-              {contour ? (
-                <>
-                  <polygon
-                    className="photo-contour-polygon"
-                    points={contour.pointsPx.map((point) => `${point.x},${point.y}`).join(' ')}
-                  />
-                  <rect
-                    className="photo-contour-bounds"
-                    height={contour.boundsPx.height}
-                    width={contour.boundsPx.width}
-                    x={contour.boundsPx.minX}
-                    y={contour.boundsPx.minY}
-                  />
-                  <text
-                    className="photo-dimension-label"
-                    x={contour.boundsPx.minX + contour.boundsPx.width / 2}
-                    y={Math.max(18, contour.boundsPx.minY - 8)}
-                  >
-                    {contour.widthMm.toFixed(1)} mm
-                  </text>
-                  <text
-                    className="photo-dimension-label"
-                    transform={`translate(${contour.boundsPx.maxX + 12} ${contour.boundsPx.minY + contour.boundsPx.height / 2}) rotate(90)`}
-                  >
-                    {contour.heightMm.toFixed(1)} mm
-                  </text>
-                  {contour.pointsPx.map((point, index) => (
-                    <circle
-                      className="photo-point-handle"
-                      cx={point.x}
-                      cy={point.y}
-                      key={`${point.x}-${point.y}-${index}`}
-                      r={5.5}
-                      onPointerDown={() => setDragIndex(index)}
-                    />
-                  ))}
-                </>
-              ) : null}
-            </svg>
-          </div>
-        )}
-
-        {values.analysis?.message ? (
-          values.analysis.status === 'ready' ? (
-            <div className="warning-box">
-              <strong>识别提醒</strong>
-              <p>{values.analysis.message}</p>
+          {!uploadedRaster ? (
+            <div className="photo-empty-state">
+              先上传一张带 L 形标尺的俯拍照片，系统会在这里显示叠加结果。
             </div>
           ) : (
-            <div className="error-box" role="alert">
-              <strong>识别失败</strong>
-              <p>{values.analysis.message}</p>
-            </div>
-          )
-        ) : null}
+            <div
+              className="photo-review-stage"
+              style={{ aspectRatio: `${uploadedRaster.width} / ${uploadedRaster.height}` }}
+            >
+              <svg
+                className="photo-review-svg"
+                ref={svgRef}
+                viewBox={`0 0 ${uploadedRaster.width} ${uploadedRaster.height}`}
+              >
+                <image
+                  height={uploadedRaster.height}
+                  href={uploadedRaster.dataUrl}
+                  width={uploadedRaster.width}
+                  x={0}
+                  y={0}
+                />
 
-        {pointRows.length > 0 ? (
-          <div className="photo-points-table">
-            <h3>关键点毫米坐标</h3>
-            <div className="photo-points-table__grid">
-              {pointRows.map((row) => (
-                <div className="photo-point-card" key={row.index}>
-                  <strong>P{row.index}</strong>
-                  <span>X {row.x.toFixed(1)} mm</span>
-                  <span>Y {row.y.toFixed(1)} mm</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
-      </section>
+                {values.analysis?.ruler.boundsPx ? (
+                  <rect
+                    className="photo-ruler-box"
+                    height={values.analysis.ruler.boundsPx.height}
+                    width={values.analysis.ruler.boundsPx.width}
+                    x={values.analysis.ruler.boundsPx.minX}
+                    y={values.analysis.ruler.boundsPx.minY}
+                  />
+                ) : null}
 
-      <PreviewCanvas
-        bounds={generation?.bounds ?? null}
-        isLoading={isGenerating}
-        positions={generation?.meshData.positions ?? null}
-      />
+                {contour ? (
+                  <>
+                    <polygon
+                      className="photo-contour-polygon"
+                      points={contour.pointsPx.map((point) => `${point.x},${point.y}`).join(' ')}
+                    />
+                    <rect
+                      className="photo-contour-bounds"
+                      height={contour.boundsPx.height}
+                      width={contour.boundsPx.width}
+                      x={contour.boundsPx.minX}
+                      y={contour.boundsPx.minY}
+                    />
+                    <text
+                      className="photo-dimension-label"
+                      x={contour.boundsPx.minX + contour.boundsPx.width / 2}
+                      y={Math.max(18, contour.boundsPx.minY - 8)}
+                    >
+                      {contour.widthMm.toFixed(1)} mm
+                    </text>
+                    <text
+                      className="photo-dimension-label"
+                      transform={`translate(${contour.boundsPx.maxX + 12} ${contour.boundsPx.minY + contour.boundsPx.height / 2}) rotate(90)`}
+                    >
+                      {contour.heightMm.toFixed(1)} mm
+                    </text>
+                    {contour.pointsPx.map((point, index) => (
+                      <circle
+                        className="photo-point-handle"
+                        cx={point.x}
+                        cy={point.y}
+                        key={`${point.x}-${point.y}-${index}`}
+                        r={5.5}
+                        onPointerDown={() => setDragIndex(index)}
+                      />
+                    ))}
+                  </>
+                ) : null}
+              </svg>
+            </div>
+          )}
+
+          {values.analysis?.message ? (
+            values.analysis.status === 'ready' ? (
+              <div className="warning-box">
+                <strong>识别提醒</strong>
+                <p>{values.analysis.message}</p>
+              </div>
+            ) : (
+              <div className="error-box" role="alert">
+                <strong>识别失败</strong>
+                <p>{values.analysis.message}</p>
+              </div>
+            )
+          ) : null}
+
+          {pointRows.length > 0 ? (
+            <div className="photo-points-table">
+              <h3>关键点毫米坐标</h3>
+              <p className="panel__body">坐标原点固定在首版轮廓的左下角，拖点时不会整体漂移。</p>
+              <div className="photo-points-table__grid">
+                {pointRows.map((row) => (
+                  <div className="photo-point-card" key={row.index}>
+                    <strong>P{row.index}</strong>
+                    <span>X {row.x.toFixed(1)} mm</span>
+                    <span>Y {row.y.toFixed(1)} mm</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </section>
+      </div>
     </div>
   )
+}
+
+function normalizeNumberControlValue(value: number | string) {
+  if (typeof value === 'number') {
+    return value
+  }
+
+  if (value.trim() === '') {
+    return value
+  }
+
+  const numeric = Number(value)
+
+  return Number.isFinite(numeric) ? numeric : value
 }
 
 function projectPointerToImage(

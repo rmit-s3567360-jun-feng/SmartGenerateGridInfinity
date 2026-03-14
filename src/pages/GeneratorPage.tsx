@@ -10,6 +10,7 @@ import {
   normalizeMemoryCardModeParams,
 } from '../lib/gridfinity/memoryCard'
 import {
+  PHOTO_OUTLINE_A4_SHEET_DOWNLOAD_PATH,
   getPhotoOutlineRecommendationSummary,
   PHOTO_OUTLINE_RULER_DOWNLOAD_PATH,
 } from '../lib/gridfinity/photoOutline'
@@ -52,9 +53,7 @@ function getGenericInnerSpan(
 function isTemplateId(value: string | undefined): value is TemplateId {
   return (
     value === 'generic-bin' ||
-    value === 'screwdriver-rack' ||
     value === 'memory-card-tray' ||
-    value === 'pliers-holder' ||
     value === 'photo-outline-bin'
   )
 }
@@ -78,6 +77,7 @@ export function GeneratorPage() {
     generation,
     isExporting,
     isGenerating,
+    isPreviewPending,
     runtimeError,
     validationErrors,
   } = useModelGenerator(templateId, rawParams)
@@ -272,6 +272,7 @@ export function GeneratorPage() {
           <PhotoOutlineWorkflow
             generation={generation}
             isGenerating={isGenerating}
+            isPreviewPending={isPreviewPending}
             onChange={handleParamChange}
             onReset={() => {
               setRawParams(template.defaultParams)
@@ -295,6 +296,7 @@ export function GeneratorPage() {
             <PreviewCanvas
               bounds={generation?.bounds ?? null}
               isLoading={isGenerating}
+              isPending={isPreviewPending}
               positions={generation?.meshData.positions ?? null}
             />
           </>
@@ -373,7 +375,6 @@ export function GeneratorPage() {
                   {photoOutlineSummary.size.heightUnits}
                 </li>
                 <li>摆放方向: {photoOutlineSummary.orientationLabel}</li>
-                <li>取物凹槽: {photoOutlineSummary.gripLabel}</li>
                 <li>
                   轮廓尺寸: {photoOutlineSummary.contourWidthMm.toFixed(1)} x{' '}
                   {photoOutlineSummary.contourHeightMm.toFixed(1)} mm
@@ -402,6 +403,12 @@ export function GeneratorPage() {
                     下载标尺 STL
                   </a>
                 </li>
+                <li>
+                  <a download href={PHOTO_OUTLINE_A4_SHEET_DOWNLOAD_PATH}>
+                    下载 A4 校准底纸 SVG
+                  </a>
+                </li>
+                <li>A4 底纸: 当前 V1 仍以内嵌 L 标尺校准，角标供后续整页校准升级</li>
                 <li>首版边界: 单物体、俯拍、干净背景、同平面校准</li>
               </ul>
             </div>

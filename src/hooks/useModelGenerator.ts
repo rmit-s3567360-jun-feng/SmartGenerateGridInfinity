@@ -36,6 +36,7 @@ export function useModelGenerator(
   const validationErrors = validation.success
     ? []
     : validation.error.issues.map((issue) => firstSentence(issue.message))
+  const isPreviewPending = rawParams !== debouncedParams
 
   useEffect(() => {
     const worker = new Worker(new URL('../workers/model.worker.ts', import.meta.url), {
@@ -175,6 +176,7 @@ export function useModelGenerator(
     isExporting,
     runtimeError,
     validationErrors,
+    isPreviewPending,
     exportModel,
   }
 }

@@ -48,6 +48,30 @@
 http://localhost:5173
 ```
 
+### macOS 一键启动
+
+直接双击运行：
+
+[`scripts/start-dev.command`](./scripts/start-dev.command)
+
+如果是第一次从 Git 拉下来后没有执行权限，先在终端执行：
+
+```bash
+chmod +x ./scripts/start-dev.command
+```
+
+然后可以双击脚本，或者在终端里执行：
+
+```bash
+./scripts/start-dev.command
+```
+
+脚本会：
+
+- 自动检查 `npm`
+- 如果没有 `node_modules`，先执行 `npm install`
+- 启动开发服务器并自动打开浏览器
+
 ### 手动启动
 
 ```powershell

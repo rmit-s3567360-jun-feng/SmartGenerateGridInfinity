@@ -3,9 +3,7 @@ import type { ZodType } from 'zod'
 
 export type TemplateId =
   | 'generic-bin'
-  | 'screwdriver-rack'
   | 'memory-card-tray'
-  | 'pliers-holder'
   | 'photo-outline-bin'
 
 export type PrimitiveParamValue = string | number | boolean
@@ -54,15 +52,6 @@ export interface GenericBinParams extends BaseBinParams {
   dividerY3: number
 }
 
-export interface ScrewdriverRackParams extends BaseBinParams {
-  slotCount: number
-  holeDiameter: number
-  rowCount: number
-  spacing: number
-  tiltDegrees: number
-  handleClearance: number
-}
-
 export type MemoryCardMode =
   | 'micro-sd-compact'
   | 'sd-compact'
@@ -78,14 +67,6 @@ export interface MemoryCardTrayParams extends BaseBinParams {
   lockOuterSize: boolean
   slotTolerance: number
   minGripMargin: number
-}
-
-export interface PliersHolderParams extends BaseBinParams {
-  toolCount: number
-  channelWidth: number
-  channelDepth: number
-  spacing: number
-  handleOpening: number
 }
 
 export interface PhotoPoint {
@@ -144,20 +125,19 @@ export interface PhotoOutlineAnalysis {
   detection: {
     foregroundThreshold: number
     simplifyTolerance: number
+    contourMode: PhotoContourMode
   }
 }
 
-export type PhotoGripMode = 'double-sided' | 'single-sided' | 'auto-side'
-export type PhotoSingleGripSide = 'left' | 'right'
+export type PhotoContourMode = 'detail' | 'smooth' | 'rounded'
 
 export interface PhotoOutlineBinParams extends BaseBinParams {
   objectHeight: number
   cavityClearance: number
   depthClearance: number
-  gripMode: PhotoGripMode
-  singleGripSide: PhotoSingleGripSide
   foregroundThreshold: number
   simplifyTolerance: number
+  contourMode: PhotoContourMode
   analysis: PhotoOutlineAnalysis | null
 }
 
@@ -227,9 +207,7 @@ export interface TemplateCatalogItem {
 
 export type AnyTemplateDefinition =
   | TemplateDefinition<GenericBinParams>
-  | TemplateDefinition<ScrewdriverRackParams>
   | TemplateDefinition<MemoryCardTrayParams>
-  | TemplateDefinition<PliersHolderParams>
   | TemplateDefinition<PhotoOutlineBinParams>
 
 export interface GenerationRequest {

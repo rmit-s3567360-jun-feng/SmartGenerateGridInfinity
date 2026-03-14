@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="210mm" height="297mm" viewBox="0 0 210 297">
+  <defs>
+    <style>
+      .title { font: 700 5px 'IBM Plex Sans', 'Segoe UI', sans-serif; fill: #d6dbde; }
+      .label { font: 400 3.2px 'IBM Plex Sans', 'Segoe UI', sans-serif; fill: #d9dfe2; }
+      .mono { font: 400 3px 'IBM Plex Mono', 'Consolas', monospace; fill: #d3d8dc; }
+      .zone { fill: none; stroke: #dbe1e4; stroke-width: 0.6; stroke-dasharray: 3 2; }
+      .guide { fill: none; stroke: #e5e9eb; stroke-width: 0.45; }
+      .safe { fill: none; stroke: #edf0f2; stroke-width: 0.4; stroke-dasharray: 2 2; }
+      .marker { fill: none; stroke: #d8dde0; stroke-width: 0.8; }
+      .ruler { fill: #181818; }
+      .ruler-label { font: 700 3px 'IBM Plex Mono', 'Consolas', monospace; fill: #181818; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="210" height="297" fill="#ffffff" />
+  <rect class="guide" x="8" y="8" width="194" height="281" rx="2" />
+  <rect class="safe" x="12" y="12" width="186" height="273" rx="2" />
+
+  <text class="title" x="18" y="20">PHOTO OUTLINE A4 CALIBRATION SHEET</text>
+  <text class="label" x="18" y="26">Print at 100% actual size. V1 uses the embedded L ruler.</text>
+  <text class="mono" x="18" y="31">A4 210 x 297 mm</text>
+
+  <g transform="translate(14 14)">
+    <rect class="marker" width="14" height="14" rx="1.5" />
+    <line class="marker" x1="7" y1="0" x2="7" y2="14" />
+    <line class="marker" x1="0" y1="7" x2="14" y2="7" />
+  </g>
+  <g transform="translate(182 14)">
+    <rect class="marker" width="14" height="14" rx="1.5" />
+    <line class="marker" x1="7" y1="0" x2="7" y2="14" />
+    <line class="marker" x1="0" y1="7" x2="14" y2="7" />
+  </g>
+  <g transform="translate(182 269)">
+    <rect class="marker" width="14" height="14" rx="1.5" />
+    <line class="marker" x1="7" y1="0" x2="7" y2="14" />
+    <line class="marker" x1="0" y1="7" x2="14" y2="7" />
+  </g>
+  <g transform="translate(14 269)">
+    <rect class="marker" width="14" height="14" rx="1.5" />
+    <line class="marker" x1="7" y1="0" x2="7" y2="14" />
+    <line class="marker" x1="0" y1="7" x2="14" y2="7" />
+  </g>
+
+  <rect class="zone" x="50" y="40" width="120" height="152" rx="5" />
+  <line class="guide" x1="110" y1="48" x2="110" y2="184" />
+  <line class="guide" x1="58" y1="116" x2="162" y2="116" />
+
+  <g>
+    <rect class="ruler" x="18" y="257" width="80" height="10" rx="1.2" />
+    <rect class="ruler" x="18" y="207" width="10" height="60" rx="1.2" />
+    <text class="ruler-label" x="44" y="253">80 mm</text>
+    <text class="ruler-label" x="32" y="236" transform="rotate(-90 32 236)">60 mm</text>
+  </g>
+
+  <text class="mono" x="18" y="288">Keep the paper flat. Avoid fit-to-page. Place the object inside the dashed zone.</text>
+</svg>

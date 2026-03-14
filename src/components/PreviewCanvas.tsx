@@ -23,12 +23,14 @@ import type { BoundsSummary } from '../lib/gridfinity/types'
 interface PreviewCanvasProps {
   bounds: BoundsSummary | null
   isLoading: boolean
+  isPending?: boolean
   positions: Float32Array | null
 }
 
 export function PreviewCanvas({
   bounds,
   isLoading,
+  isPending = false,
   positions,
 }: PreviewCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -37,6 +39,7 @@ export function PreviewCanvas({
   const axesRef = useRef<AxesHelper | null>(null)
   const modelGroupRef = useRef<Group | null>(null)
   const meshRef = useRef<Mesh | null>(null)
+  const fitViewRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     const container = containerRef.current
@@ -154,6 +157,52 @@ export function PreviewCanvas({
       return
     }
 
+    const fitCameraToBounds = (nextBounds: BoundsSummary | null) => {
+      if (!nextBounds) {
+        modelGroup.position.set(0, 0, 0)
+        axes.position.set(0, 0, 0)
+        axes.scale.setScalar(24)
+        controls.target.set(0, 0, 20)
+        camera.position.set(150, -160, 110)
+        camera.near = 0.1
+        camera.far = 2000
+        camera.updateProjectionMatrix()
+        controls.update()
+        return
+      }
+
+      const originOffset = new Vector3(
+        -nextBounds.min[0],
+        -nextBounds.min[1],
+        -nextBounds.min[2],
+      )
+      modelGroup.position.copy(originOffset)
+
+      const box = new Box3(
+        new Vector3(0, 0, 0),
+        new Vector3(...nextBounds.size),
+      )
+      const center = box.getCenter(new Vector3())
+      const size = box.getSize(new Vector3())
+      const maxDim = Math.max(size.x, size.y, size.z, 18)
+      const distance = maxDim * 2
+      const axisLength = Math.max(maxDim * 0.75, 24)
+
+      axes.position.set(0, 0, 0)
+      axes.scale.setScalar(axisLength)
+
+      controls.target.copy(center)
+      camera.position.set(
+        center.x + distance * 0.8,
+        center.y - distance * 0.95,
+        center.z + distance * 0.55,
+      )
+      camera.near = 0.1
+      camera.far = distance * 12
+      camera.updateProjectionMatrix()
+      controls.update()
+    }
+
     const nextGeometry = new BufferGeometry()
 
     if (positions && positions.length > 0) {
@@ -163,44 +212,11 @@ export function PreviewCanvas({
 
     mesh.geometry.dispose()
     mesh.geometry = nextGeometry
-
-    if (!bounds) {
-      modelGroup.position.set(0, 0, 0)
-      axes.scale.setScalar(24)
-      return
-    }
-
-    const originOffset = new Vector3(
-      -bounds.min[0],
-      -bounds.min[1],
-      -bounds.min[2],
-    )
-    modelGroup.position.copy(originOffset)
-
-    const box = new Box3(
-      new Vector3(0, 0, 0),
-      new Vector3(...bounds.size),
-    )
-    const center = box.getCenter(new Vector3())
-    const size = box.getSize(new Vector3())
-    const maxDim = Math.max(size.x, size.y, size.z, 18)
-    const distance = maxDim * 2
-    const axisLength = Math.max(maxDim * 0.75, 24)
-
-    axes.position.set(0, 0, 0)
-    axes.scale.setScalar(axisLength)
-
-    controls.target.copy(center)
-    camera.position.set(
-      center.x + distance * 0.8,
-      center.y - distance * 0.95,
-      center.z + distance * 0.55,
-    )
-    camera.near = 0.1
-    camera.far = distance * 12
-    camera.updateProjectionMatrix()
-    controls.update()
+    fitViewRef.current = () => fitCameraToBounds(bounds)
+    fitCameraToBounds(bounds)
   }, [bounds, positions])
+
+  const statusLabel = isLoading ? '生成中...' : isPending ? '等待更新...' : null
 
   return (
     <section className="preview-shell">
@@ -209,7 +225,23 @@ export function PreviewCanvas({
           <p className="panel__eyebrow">3D 预览</p>
           <h2>实时网格</h2>
         </div>
-        {isLoading ? <span className="status-pill">生成中...</span> : null}
+        <div className="preview-shell__actions">
+          {statusLabel ? (
+            <span
+              className={isPending && !isLoading ? 'status-pill status-pill--pending' : 'status-pill'}
+            >
+              {statusLabel}
+            </span>
+          ) : null}
+          <button
+            className="button button--ghost preview-reset-button"
+            disabled={!bounds}
+            type="button"
+            onClick={() => fitViewRef.current?.()}
+          >
+            重置视角
+          </button>
+        </div>
       </div>
       <div className="preview-canvas" ref={containerRef}>
         <div className="axis-legend" aria-label="坐标轴图例">

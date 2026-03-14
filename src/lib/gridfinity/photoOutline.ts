@@ -1,18 +1,18 @@
 import { booleans, expansions, extrusions, geometries, transforms } from '@jscad/modeling'
 
-import { createBaseBinSolid, createPocketBetween } from './base'
-import { getBinMetrics, gridUnitsToMillimeters, heightUnitsToMillimeters } from './spec'
+import { createBaseBinSolid } from './base'
+import { gridUnitsToMillimeters, heightUnitsToMillimeters } from './spec'
 import type {
   BaseBinParams,
   GridfinitySpec,
   PhotoBounds,
   PhotoOutlineAnalysis,
   PhotoOutlineBinParams,
+  PhotoContourMode,
   PhotoOutlineContour,
   PhotoOutlineRulerDetection,
   PhotoOutlineSource,
   PhotoPoint,
-  PhotoSingleGripSide,
   TemplateBuildOutput,
 } from './types'
 
@@ -24,15 +24,15 @@ const { translate } = transforms
 
 export const PHOTO_OUTLINE_RULER_DOWNLOAD_PATH =
   '/downloads/photo-outline-l-ruler-80x60mm.stl'
+export const PHOTO_OUTLINE_A4_SHEET_DOWNLOAD_PATH =
+  '/downloads/photo-outline-a4-calibration-sheet.svg'
 export const PHOTO_OUTLINE_RULER_WIDTH_MM = 80
 export const PHOTO_OUTLINE_RULER_HEIGHT_MM = 60
 export const PHOTO_OUTLINE_RULER_BAR_WIDTH_MM = 10
 export const PHOTO_OUTLINE_RULER_THICKNESS_MM = 2
+export const PHOTO_OUTLINE_A4_SHEET_WIDTH_MM = 210
+export const PHOTO_OUTLINE_A4_SHEET_HEIGHT_MM = 297
 const PHOTO_OUTLINE_EDGE_MARGIN_MM = 4
-const PHOTO_OUTLINE_GRIP_CHANNEL_WIDTH_MM = 12
-const PHOTO_OUTLINE_SINGLE_GRIP_RESERVE_MM = PHOTO_OUTLINE_GRIP_CHANNEL_WIDTH_MM
-const PHOTO_OUTLINE_DOUBLE_GRIP_RESERVE_MM =
-  PHOTO_OUTLINE_GRIP_CHANNEL_WIDTH_MM * 2
 const PHOTO_OUTLINE_MAX_KEYPOINTS = 18
 
 interface RasterSource {
@@ -68,12 +68,9 @@ interface LShapeMetrics {
   verticalRatio: number
 }
 
-interface GripResolution {
-  sides: PhotoSingleGripSide[]
-  label: string
-  shiftX: number
-  reserveMm: number
-  warning?: string
+interface ObjectCandidate {
+  component: ConnectedComponent
+  score: number
 }
 
 export interface PhotoOutlinePlan {
@@ -90,8 +87,6 @@ export interface PhotoOutlinePlan {
   cavityBottomZ: number
   cavityTopZ: number
   cavityDepth: number
-  gripSides: PhotoSingleGripSide[]
-  gripLabel: string
   mmPerPixel: number
   warnings: string[]
 }
@@ -99,7 +94,6 @@ export interface PhotoOutlinePlan {
 export interface PhotoOutlineRecommendationSummary {
   size: PhotoOutlinePlan['size']
   orientationLabel: string
-  gripLabel: string
   contourWidthMm: number
   contourHeightMm: number
   mmPerPixel: number
@@ -118,10 +112,9 @@ export const photoOutlineDefaultParams: PhotoOutlineBinParams = {
   objectHeight: 18,
   cavityClearance: 1.2,
   depthClearance: 1.2,
-  gripMode: 'auto-side',
-  singleGripSide: 'right',
   foregroundThreshold: 46,
   simplifyTolerance: 3.4,
+  contourMode: 'smooth',
   analysis: null,
 }
 
@@ -154,12 +147,16 @@ export function createPhotoOutlineFixtureAnalysis(): PhotoOutlineAnalysis {
   return createReadyAnalysis(source, ruler, pointsPx, {
     foregroundThreshold: photoOutlineDefaultParams.foregroundThreshold,
     simplifyTolerance: photoOutlineDefaultParams.simplifyTolerance,
+    contourMode: photoOutlineDefaultParams.contourMode,
   })
 }
 
 export function detectPhotoOutlineFromRaster(
   source: RasterSource,
-  options: Pick<PhotoOutlineBinParams, 'foregroundThreshold' | 'simplifyTolerance'>,
+  options: Pick<
+    PhotoOutlineBinParams,
+    'foregroundThreshold' | 'simplifyTolerance' | 'contourMode'
+  >,
 ): PhotoOutlineAnalysis {
   const background = estimateBackgroundColor(source.data, source.width, source.height)
   const darkMask = createMask(source.width, source.height, (index) => {
@@ -167,13 +164,8 @@ export function detectPhotoOutlineFromRaster(
     const r = source.data[offset]
     const g = source.data[offset + 1]
     const b = source.data[offset + 2]
-    const channelSpread = Math.max(r, g, b) - Math.min(r, g, b)
 
-    return (
-      luminance(r, g, b) < 88 &&
-      colorDistance([r, g, b], background) > 28 &&
-      channelSpread <= 28
-    )
+    return isLikelyRulerPixel([r, g, b], background)
   })
   const darkComponents = getConnectedComponents(darkMask, source.width, source.height)
   const rulerCandidate = selectRulerCandidate(darkComponents, source.width, source.height)
@@ -181,7 +173,7 @@ export function detectPhotoOutlineFromRaster(
   if (!rulerCandidate) {
     return createErrorAnalysis(
       source,
-      '未识别到 L 形标尺，请让黑色标尺与物体同平面并放在干净背景上。',
+      '未识别到 L 形标尺，请让深色标尺与物体同平面并放在干净背景上。',
       options,
     )
   }
@@ -211,23 +203,28 @@ export function detectPhotoOutlineFromRaster(
     },
   )
 
-  for (const pixel of rulerCandidate.component.pixels) {
-    foregroundMask[pixel] = 0
-  }
-
-  clearMaskBorder(foregroundMask, source.width, source.height)
-  const objectComponents = getConnectedComponents(
+  clearComponentPixels(foregroundMask, rulerCandidate.component.pixels)
+  const silhouetteMask = createSilhouetteMask(
+    source,
+    background,
     foregroundMask,
+    rulerCandidate.component.pixels,
+    options.foregroundThreshold,
+  )
+  const primaryComponents = getConnectedComponents(
+    silhouetteMask,
     source.width,
     source.height,
   )
-  const objectComponent = selectObjectComponent(
-    objectComponents,
+  const objectCandidate = selectObjectComponent(
+    primaryComponents,
     rulerCandidate.boundsPx,
+    source.width,
+    source.height,
     source.width * source.height,
   )
 
-  if (!objectComponent) {
+  if (!objectCandidate) {
     return {
       status: 'error',
       message: '已识别到标尺，但没有找到清晰的单物体轮廓。',
@@ -237,13 +234,14 @@ export function detectPhotoOutlineFromRaster(
       detection: {
         foregroundThreshold: options.foregroundThreshold,
         simplifyTolerance: options.simplifyTolerance,
+        contourMode: options.contourMode,
       },
     }
   }
 
   const objectMask = new Uint8Array(source.width * source.height)
 
-  for (const pixel of objectComponent.pixels) {
+  for (const pixel of objectCandidate.component.pixels) {
     objectMask[pixel] = 1
   }
 
@@ -259,11 +257,16 @@ export function detectPhotoOutlineFromRaster(
       detection: {
         foregroundThreshold: options.foregroundThreshold,
         simplifyTolerance: options.simplifyTolerance,
+        contourMode: options.contourMode,
       },
     }
   }
 
-  const simplifiedLoop = simplifyClosedLoop(rawLoop, options.simplifyTolerance)
+  const simplifiedLoop = simplifyClosedLoop(
+    rawLoop,
+    options.simplifyTolerance,
+    options.contourMode,
+  )
 
   if (simplifiedLoop.length < 4) {
     return {
@@ -275,6 +278,7 @@ export function detectPhotoOutlineFromRaster(
       detection: {
         foregroundThreshold: options.foregroundThreshold,
         simplifyTolerance: options.simplifyTolerance,
+        contourMode: options.contourMode,
       },
     }
   }
@@ -286,6 +290,7 @@ export function detectPhotoOutlineFromRaster(
     {
       foregroundThreshold: options.foregroundThreshold,
       simplifyTolerance: options.simplifyTolerance,
+      contourMode: options.contourMode,
     },
   )
 
@@ -326,7 +331,6 @@ export function getPhotoOutlineRecommendationSummary(
   return {
     size: plan.size,
     orientationLabel: plan.orientation === 90 ? '90°' : '0°',
-    gripLabel: plan.gripLabel,
     contourWidthMm: roundNumber(plan.contourWidthMm, 1),
     contourHeightMm: roundNumber(plan.contourHeightMm, 1),
     mmPerPixel: roundNumber(plan.mmPerPixel, 4),
@@ -357,17 +361,11 @@ export function resolvePhotoOutlinePlan(
         const outerY = gridUnitsToMillimeters(gridY, spec)
         const innerX = outerX - params.wallThickness * 2
         const innerY = outerY - params.wallThickness * 2
-        const grip = resolveGripMode(params, rotatedPoints, bounds, innerX)
-
-        if (!grip) {
-          continue
-        }
 
         const requiredWidth =
           bounds.width +
           params.cavityClearance * 2 +
-          PHOTO_OUTLINE_EDGE_MARGIN_MM * 2 +
-          grip.reserveMm
+          PHOTO_OUTLINE_EDGE_MARGIN_MM * 2
         const requiredDepth =
           bounds.height +
           params.cavityClearance * 2 +
@@ -386,17 +384,14 @@ export function resolvePhotoOutlinePlan(
             continue
           }
 
-          const shiftedPoints = translatePoints(rotatedPoints, grip.shiftX, 0)
-          const shiftedBounds = getPointBounds(shiftedPoints)
-
           if (
-            shiftedBounds.minX - params.cavityClearance <
+            bounds.minX - params.cavityClearance <
               -innerX / 2 + PHOTO_OUTLINE_EDGE_MARGIN_MM ||
-            shiftedBounds.maxX + params.cavityClearance >
+            bounds.maxX + params.cavityClearance >
               innerX / 2 - PHOTO_OUTLINE_EDGE_MARGIN_MM ||
-            shiftedBounds.minY - params.cavityClearance <
+            bounds.minY - params.cavityClearance <
               -innerY / 2 + PHOTO_OUTLINE_EDGE_MARGIN_MM ||
-            shiftedBounds.maxY + params.cavityClearance >
+            bounds.maxY + params.cavityClearance >
               innerY / 2 - PHOTO_OUTLINE_EDGE_MARGIN_MM
           ) {
             continue
@@ -406,10 +401,6 @@ export function resolvePhotoOutlinePlan(
 
           if (orientation === 90) {
             planWarnings.push('已自动切换为 90° 摆放，以减小外部尺寸。')
-          }
-
-          if (grip.warning) {
-            planWarnings.push(grip.warning)
           }
 
           const resolvedParams: BaseBinParams = {
@@ -426,14 +417,12 @@ export function resolvePhotoOutlinePlan(
             size: { gridX, gridY, heightUnits },
             orientation,
             resolvedParams,
-            cavityPointsMm: shiftedPoints,
-            contourWidthMm: roundNumber(shiftedBounds.width, 2),
-            contourHeightMm: roundNumber(shiftedBounds.height, 2),
+            cavityPointsMm: rotatedPoints,
+            contourWidthMm: roundNumber(bounds.width, 2),
+            contourHeightMm: roundNumber(bounds.height, 2),
             cavityBottomZ: roundNumber(cavityBottomZ, 2),
             cavityTopZ: roundNumber(heightMm + 1.2, 2),
             cavityDepth: roundNumber(cavityDepth, 2),
-            gripSides: grip.sides,
-            gripLabel: grip.label,
             mmPerPixel: params.analysis.ruler.mmPerPixel,
             warnings: Array.from(new Set(planWarnings)),
             volume: outerX * outerY * heightMm,
@@ -466,8 +455,6 @@ export function resolvePhotoOutlinePlan(
     cavityBottomZ: best.cavityBottomZ,
     cavityTopZ: best.cavityTopZ,
     cavityDepth: best.cavityDepth,
-    gripSides: best.gripSides,
-    gripLabel: best.gripLabel,
     mmPerPixel: best.mmPerPixel,
     warnings: best.warnings,
   }
@@ -479,7 +466,6 @@ export function buildPhotoOutlineBin(
 ): TemplateBuildOutput {
   const plan = resolvePhotoOutlinePlan(params, spec)
   const solid = createBaseBinSolid(plan.resolvedParams, spec)
-  const metrics = getBinMetrics(plan.resolvedParams, spec)
   const contourProfile = createContourProfile(plan.cavityPointsMm, params.cavityClearance)
   const cavity = translate(
     [0, 0, plan.cavityBottomZ],
@@ -488,56 +474,11 @@ export function buildPhotoOutlineBin(
       contourProfile,
     ),
   )
-  const gripChannels = plan.gripSides.flatMap((side) =>
-    createGripChannels(side, metrics.outerX, metrics.outerY, plan, params),
-  )
 
   return {
-    geometry: subtract(solid, cavity, ...gripChannels),
+    geometry: subtract(solid, cavity),
     warnings: plan.warnings,
   }
-}
-
-function createGripChannels(
-  side: PhotoSingleGripSide,
-  outerX: number,
-  outerY: number,
-  plan: PhotoOutlinePlan,
-  params: Pick<PhotoOutlineBinParams, 'objectHeight'>,
-) {
-  const sideInset = side === 'left' ? -1 : 1
-  const reach = PHOTO_OUTLINE_GRIP_CHANNEL_WIDTH_MM
-  const spanY = Math.min(outerY - 8, plan.contourHeightMm + 16)
-  const upperBottomZ = Math.max(plan.cavityBottomZ, plan.cavityTopZ - params.objectHeight * 0.52)
-  const lowerBottomZ = Math.max(plan.cavityBottomZ, plan.cavityTopZ - params.objectHeight * 0.86)
-  const lowerTopZ = Math.max(lowerBottomZ + 5, plan.cavityTopZ - params.objectHeight * 0.24)
-  const sideCenterX =
-    side === 'left'
-      ? -outerX / 2 + reach / 2 + 0.5
-      : outerX / 2 - reach / 2 - 0.5
-
-  return [
-    createPocketBetween(
-      reach,
-      spanY,
-      upperBottomZ,
-      plan.cavityTopZ + 0.2,
-      sideCenterX,
-      0,
-      2.2,
-      20,
-    ),
-    createPocketBetween(
-      reach * 0.72,
-      spanY * 0.62,
-      lowerBottomZ,
-      lowerTopZ,
-      sideCenterX - sideInset * 1.2,
-      0,
-      1.6,
-      16,
-    ),
-  ]
 }
 
 function createContourProfile(points: PhotoPoint[], clearance: number) {
@@ -551,98 +492,6 @@ function createContourProfile(points: PhotoPoint[], clearance: number) {
     { delta: clearance, corners: 'round', segments: 24 },
     profile,
   ) as ReturnType<typeof geom2.fromPoints>
-}
-
-function resolveGripMode(
-  params: Pick<PhotoOutlineBinParams, 'gripMode' | 'singleGripSide'>,
-  points: PhotoPoint[],
-  bounds: PhotoBounds,
-  innerX: number,
-) {
-  const preferredSide = getPreferredSingleSide(points)
-
-  if (params.gripMode === 'double-sided') {
-    if (
-      bounds.width +
-        PHOTO_OUTLINE_DOUBLE_GRIP_RESERVE_MM +
-        PHOTO_OUTLINE_EDGE_MARGIN_MM * 2 >
-      innerX
-    ) {
-      return null
-    }
-
-    return {
-      sides: ['left', 'right'],
-      label: '双侧双层',
-      shiftX: 0,
-      reserveMm: PHOTO_OUTLINE_DOUBLE_GRIP_RESERVE_MM,
-    } satisfies GripResolution
-  }
-
-  if (params.gripMode === 'single-sided') {
-    if (
-      bounds.width +
-        PHOTO_OUTLINE_SINGLE_GRIP_RESERVE_MM +
-        PHOTO_OUTLINE_EDGE_MARGIN_MM * 2 >
-      innerX
-    ) {
-      return null
-    }
-
-    return {
-      sides: [params.singleGripSide],
-      label: `单侧双层（${params.singleGripSide === 'left' ? '左侧' : '右侧'}）`,
-      shiftX:
-        params.singleGripSide === 'left'
-          ? PHOTO_OUTLINE_SINGLE_GRIP_RESERVE_MM / 2
-          : -PHOTO_OUTLINE_SINGLE_GRIP_RESERVE_MM / 2,
-      reserveMm: PHOTO_OUTLINE_SINGLE_GRIP_RESERVE_MM,
-    } satisfies GripResolution
-  }
-
-  if (
-    bounds.width +
-      PHOTO_OUTLINE_DOUBLE_GRIP_RESERVE_MM +
-      PHOTO_OUTLINE_EDGE_MARGIN_MM * 2 <=
-    innerX
-  ) {
-    return {
-      sides: ['left', 'right'],
-      label: '自动侧选择：双侧双层',
-      shiftX: 0,
-      reserveMm: PHOTO_OUTLINE_DOUBLE_GRIP_RESERVE_MM,
-    } satisfies GripResolution
-  }
-
-  if (
-    bounds.width +
-      PHOTO_OUTLINE_SINGLE_GRIP_RESERVE_MM +
-      PHOTO_OUTLINE_EDGE_MARGIN_MM * 2 <=
-    innerX
-  ) {
-    return {
-      sides: [preferredSide],
-      label: `自动侧选择：单侧双层（${preferredSide === 'left' ? '左侧' : '右侧'}）`,
-      shiftX:
-        preferredSide === 'left'
-          ? PHOTO_OUTLINE_SINGLE_GRIP_RESERVE_MM / 2
-          : -PHOTO_OUTLINE_SINGLE_GRIP_RESERVE_MM / 2,
-      reserveMm: PHOTO_OUTLINE_SINGLE_GRIP_RESERVE_MM,
-      warning: '剩余空间不足，已自动改为单侧双层凹槽。',
-    } satisfies GripResolution
-  }
-
-  return null
-}
-
-function getPreferredSingleSide(points: PhotoPoint[]): PhotoSingleGripSide {
-  const centroid = getPolygonCentroid(points)
-
-  if (Math.abs(centroid.x) > 0.25) {
-    return centroid.x > 0 ? 'right' : 'left'
-  }
-
-  return 'right'
 }
 
 function createReadyAnalysis(
@@ -932,21 +781,89 @@ function getLCornerMetrics(
 function selectObjectComponent(
   components: ConnectedComponent[],
   rulerBounds: PhotoBounds,
+  imageWidth: number,
+  imageHeight: number,
   totalPixels: number,
 ) {
   return components
-    .filter((component) => {
+    .map((component) => {
       const bounds = componentBounds(component)
       const overlapArea = intersectionArea(bounds, rulerBounds)
       const componentArea = Math.max(bounds.width * bounds.height, 1)
+      const fillScore = clampNumber(component.area / componentArea, 0, 1)
+      const boundsCenter = {
+        x: (bounds.minX + bounds.maxX) / 2,
+        y: (bounds.minY + bounds.maxY) / 2,
+      }
+      const imageCenter = {
+        x: imageWidth / 2,
+        y: imageHeight / 2,
+      }
+      const rulerCenter = {
+        x: (rulerBounds.minX + rulerBounds.maxX) / 2,
+        y: (rulerBounds.minY + rulerBounds.maxY) / 2,
+      }
+      const imageDiagonal = Math.hypot(imageWidth, imageHeight)
+      const centerScore =
+        1 -
+        Math.min(
+          1,
+          Math.hypot(
+            boundsCenter.x - imageCenter.x,
+            boundsCenter.y - imageCenter.y,
+          ) /
+            (imageDiagonal * 0.34),
+        )
+      const borderInset = Math.min(
+        bounds.minX,
+        bounds.minY,
+        imageWidth - bounds.maxX,
+        imageHeight - bounds.maxY,
+      )
+      const borderScore = clampNumber(
+        borderInset / (Math.min(imageWidth, imageHeight) * 0.08),
+        0,
+        1,
+      )
+      const rulerDistanceScore = clampNumber(
+        Math.hypot(
+          boundsCenter.x - rulerCenter.x,
+          boundsCenter.y - rulerCenter.y,
+        ) /
+          (imageDiagonal * 0.26),
+        0,
+        1,
+      )
+      const sizeScore = clampNumber(
+        component.area / (totalPixels * 0.032),
+        0,
+        1,
+      )
 
-      return (
+      if (
         component.area > totalPixels * 0.002 &&
         component.area < totalPixels * 0.7 &&
         overlapArea / componentArea < 0.12
-      )
+      ) {
+        return {
+          component,
+          score:
+            sizeScore * 0.58 +
+            fillScore * 0.16 +
+            centerScore * 0.14 +
+            borderScore * 0.08 +
+            rulerDistanceScore * 0.04,
+        } satisfies ObjectCandidate
+      }
+
+      return null
     })
-    .sort((left, right) => right.area - left.area)[0]
+    .filter((candidate): candidate is ObjectCandidate => candidate !== null)
+    .sort(
+      (left, right) =>
+        right.component.area - left.component.area ||
+        right.score - left.score,
+    )[0]
 }
 
 function extractOuterLoop(mask: Uint8Array, width: number, height: number) {
@@ -1018,24 +935,112 @@ function extractOuterLoop(mask: Uint8Array, width: number, height: number) {
   return loops.sort((left, right) => Math.abs(polygonArea(right)) - Math.abs(polygonArea(left)))[0]
 }
 
-function simplifyClosedLoop(points: PhotoPoint[], tolerance: number) {
-  let simplified = removeCollinearPoints(normalizeClosedPoints(points))
+function simplifyClosedLoop(
+  points: PhotoPoint[],
+  tolerance: number,
+  mode: PhotoContourMode,
+) {
+  const normalized = normalizeClosedPoints(points)
 
-  if (simplified.length > PHOTO_OUTLINE_MAX_KEYPOINTS) {
-    const open = [...simplified, simplified[0]]
-    simplified = removeCollinearPoints(rdp(open, tolerance).slice(0, -1))
+  if (mode === 'rounded') {
+    return createRoundedEnvelopeLoop(normalized)
   }
 
-  if (simplified.length > PHOTO_OUTLINE_MAX_KEYPOINTS) {
-    const step = Math.ceil(simplified.length / PHOTO_OUTLINE_MAX_KEYPOINTS)
+  let simplified =
+    mode === 'smooth'
+      ? smoothClosedLoop(normalized, 2, 2)
+      : normalized.map((point) => ({ ...point }))
+  simplified = removeCollinearPoints(simplified)
+
+  const maxKeypoints = mode === 'detail' ? PHOTO_OUTLINE_MAX_KEYPOINTS : 12
+  const epsilon = tolerance * (mode === 'detail' ? 0.8 : 1.25)
+
+  if (simplified.length > maxKeypoints) {
+    const open = [...simplified, simplified[0]]
+    simplified = removeCollinearPoints(rdp(open, epsilon).slice(0, -1))
+  }
+
+  if (simplified.length > maxKeypoints) {
+    const step = Math.ceil(simplified.length / maxKeypoints)
     simplified = simplified.filter((_point, index) => index % step === 0)
   }
 
   if (simplified.length < 4) {
-    return normalizeClosedPoints(points).slice(0, 4)
+    return normalized.slice(0, 4)
   }
 
-  return simplified
+  return normalizeClosedPoints(simplified)
+}
+
+function smoothClosedLoop(points: PhotoPoint[], passes: number, radius: number) {
+  let smoothed = points.map((point) => ({ ...point }))
+  const originalBounds = getPointBounds(points)
+
+  for (let pass = 0; pass < passes; pass += 1) {
+    smoothed = smoothed.map((_point, index) => {
+      let weightedX = 0
+      let weightedY = 0
+      let totalWeight = 0
+
+      for (let offset = -radius; offset <= radius; offset += 1) {
+        const sample = smoothed[(index + offset + smoothed.length) % smoothed.length]
+        const weight = radius + 1 - Math.abs(offset)
+        weightedX += sample.x * weight
+        weightedY += sample.y * weight
+        totalWeight += weight
+      }
+
+      return {
+        x: weightedX / totalWeight,
+        y: weightedY / totalWeight,
+      } satisfies PhotoPoint
+    })
+  }
+
+  const smoothedBounds = getPointBounds(smoothed)
+  const centroid = getPolygonCentroid(smoothed)
+  const scaleX =
+    smoothedBounds.width > 0 ? originalBounds.width / smoothedBounds.width : 1
+  const scaleY =
+    smoothedBounds.height > 0 ? originalBounds.height / smoothedBounds.height : 1
+
+  return smoothed.map((point) => ({
+    x: roundNumber(centroid.x + (point.x - centroid.x) * scaleX, 3),
+    y: roundNumber(centroid.y + (point.y - centroid.y) * scaleY, 3),
+  }))
+}
+
+function createRoundedEnvelopeLoop(points: PhotoPoint[]) {
+  const centroid = getPolygonCentroid(points)
+  const angle = getPrincipalAxisAngle(points, centroid)
+  const rotated = rotatePointsAround(points, -angle, centroid)
+  const bounds = getPointBounds(rotated)
+  const maxCornerRadius = Math.max(
+    1,
+    Math.min(bounds.width, bounds.height) / 2 - 0.6,
+  )
+  const cornerRadius = clampNumber(
+    Math.min(bounds.width, bounds.height) * 0.22,
+    1.6,
+    maxCornerRadius,
+  )
+  const envelope = [
+    { x: bounds.minX + cornerRadius, y: bounds.minY },
+    { x: bounds.maxX - cornerRadius, y: bounds.minY },
+    { x: bounds.maxX, y: bounds.minY + cornerRadius },
+    { x: bounds.maxX, y: bounds.maxY - cornerRadius },
+    { x: bounds.maxX - cornerRadius, y: bounds.maxY },
+    { x: bounds.minX + cornerRadius, y: bounds.maxY },
+    { x: bounds.minX, y: bounds.maxY - cornerRadius },
+    { x: bounds.minX, y: bounds.minY + cornerRadius },
+  ] satisfies PhotoPoint[]
+
+  return normalizeClosedPoints(
+    rotatePointsAround(envelope, angle, centroid).map((point) => ({
+      x: roundNumber(point.x, 3),
+      y: roundNumber(point.y, 3),
+    })),
+  )
 }
 
 function normalizeClosedPoints(points: PhotoPoint[]) {
@@ -1138,11 +1143,23 @@ function rotatePoints(points: PhotoPoint[], orientation: 0 | 90) {
   }))
 }
 
-function translatePoints(points: PhotoPoint[], offsetX: number, offsetY: number) {
-  return points.map((point) => ({
-    x: roundNumber(point.x + offsetX, 3),
-    y: roundNumber(point.y + offsetY, 3),
-  }))
+function rotatePointsAround(
+  points: PhotoPoint[],
+  angleRadians: number,
+  origin: PhotoPoint,
+) {
+  const cos = Math.cos(angleRadians)
+  const sin = Math.sin(angleRadians)
+
+  return points.map((point) => {
+    const dx = point.x - origin.x
+    const dy = point.y - origin.y
+
+    return {
+      x: origin.x + dx * cos - dy * sin,
+      y: origin.y + dx * sin + dy * cos,
+    } satisfies PhotoPoint
+  })
 }
 
 function getPointBounds(points: PhotoPoint[]): PhotoBounds {
@@ -1164,6 +1181,22 @@ function polygonArea(points: PhotoPoint[]) {
   }
 
   return area / 2
+}
+
+function getPrincipalAxisAngle(points: PhotoPoint[], centroid: PhotoPoint) {
+  let covarianceXX = 0
+  let covarianceXY = 0
+  let covarianceYY = 0
+
+  for (const point of points) {
+    const dx = point.x - centroid.x
+    const dy = point.y - centroid.y
+    covarianceXX += dx * dx
+    covarianceXY += dx * dy
+    covarianceYY += dy * dy
+  }
+
+  return 0.5 * Math.atan2(2 * covarianceXY, covarianceXX - covarianceYY)
 }
 
 function getPolygonCentroid(points: PhotoPoint[]) {
@@ -1375,6 +1408,12 @@ function intersectionArea(left: PhotoBounds, right: PhotoBounds) {
   return width * height
 }
 
+function clearComponentPixels(mask: Uint8Array, pixels: number[]) {
+  for (const pixel of pixels) {
+    mask[pixel] = 0
+  }
+}
+
 function clearMaskBorder(mask: Uint8Array, width: number, height: number) {
   for (let x = 0; x < width; x += 1) {
     mask[x] = 0
@@ -1399,6 +1438,404 @@ function createMask(
   }
 
   return mask
+}
+
+function createSilhouetteMask(
+  source: RasterSource,
+  background: readonly [number, number, number],
+  primaryForegroundMask: Uint8Array,
+  ignoredPixels: number[],
+  foregroundThreshold: number,
+) {
+  const pixelCount = source.width * source.height
+  const backgroundLuminance = luminance(...background)
+  const ignoredMask = new Uint8Array(pixelCount)
+  const luminanceMap = new Float32Array(pixelCount)
+  const colorDistanceMap = new Float32Array(pixelCount)
+
+  for (const pixel of ignoredPixels) {
+    ignoredMask[pixel] = 1
+  }
+
+  for (let index = 0; index < pixelCount; index += 1) {
+    const offset = index * 4
+    const r = source.data[offset]
+    const g = source.data[offset + 1]
+    const b = source.data[offset + 2]
+    luminanceMap[index] = luminance(
+      r,
+      g,
+      b,
+    )
+    colorDistanceMap[index] = colorDistance([r, g, b], background)
+  }
+
+  const localMeanMap = createBoxMeanMap(luminanceMap, source.width, source.height, 4)
+  const localContrastMap = createLocalContrastMap(
+    luminanceMap,
+    source.width,
+    source.height,
+  )
+  const borderStats = collectBorderSignalStats(
+    colorDistanceMap,
+    luminanceMap,
+    localMeanMap,
+    localContrastMap,
+    source.width,
+    source.height,
+    ignoredMask,
+    backgroundLuminance,
+  )
+  const distanceTolerance = clampNumber(
+    Math.max(borderStats.distanceP90 + 4, foregroundThreshold * 0.14),
+    4.5,
+    18,
+  )
+  const luminanceTolerance = clampNumber(borderStats.luminanceP90 + 3, 3.5, 12)
+  const localMeanTolerance = clampNumber(borderStats.localMeanP90 + 4, 4, 14)
+  const contrastTolerance = clampNumber(borderStats.contrastP90 + 4, 5, 16)
+  const likelyBackgroundMask = new Uint8Array(pixelCount)
+  const protectedForegroundMask = new Uint8Array(pixelCount)
+
+  for (let index = 0; index < pixelCount; index += 1) {
+    if (ignoredMask[index]) {
+      likelyBackgroundMask[index] = 1
+      continue
+    }
+
+    const luminanceDelta = Math.abs(luminanceMap[index] - backgroundLuminance)
+    const localMeanDelta = Math.abs(localMeanMap[index] - backgroundLuminance)
+    const localContrast = localContrastMap[index]
+    const backgroundLike =
+      colorDistanceMap[index] <= distanceTolerance &&
+      luminanceDelta <= luminanceTolerance &&
+      localMeanDelta <= localMeanTolerance &&
+      localContrast <= contrastTolerance
+
+    if (backgroundLike) {
+      likelyBackgroundMask[index] = 1
+    }
+
+    if (
+      primaryForegroundMask[index] ||
+      colorDistanceMap[index] >= distanceTolerance + 1.5 ||
+      luminanceDelta >= luminanceTolerance + 1.5 ||
+      localMeanDelta >= localMeanTolerance + 1.5 ||
+      (localContrast >= contrastTolerance + 2 &&
+        (colorDistanceMap[index] >= distanceTolerance * 0.75 ||
+          localMeanDelta >= localMeanTolerance * 0.75))
+    ) {
+      protectedForegroundMask[index] = 1
+      likelyBackgroundMask[index] = 0
+    }
+  }
+
+  const expandedForegroundMask = dilateMask(
+    protectedForegroundMask,
+    source.width,
+    source.height,
+    1,
+  )
+
+  for (let index = 0; index < pixelCount; index += 1) {
+    if (expandedForegroundMask[index]) {
+      likelyBackgroundMask[index] = 0
+    }
+  }
+
+  const reachableBackground = floodFillMaskFromBorder(
+    likelyBackgroundMask,
+    source.width,
+    source.height,
+  )
+  let silhouetteMask: Uint8Array = new Uint8Array(pixelCount)
+
+  for (let index = 0; index < pixelCount; index += 1) {
+    if (!reachableBackground[index] && !ignoredMask[index]) {
+      silhouetteMask[index] = 1
+    }
+  }
+
+  clearMaskBorder(silhouetteMask, source.width, source.height)
+  silhouetteMask = closeMask(silhouetteMask, source.width, source.height, 1)
+  clearComponentPixels(silhouetteMask, ignoredPixels)
+  clearMaskBorder(silhouetteMask, source.width, source.height)
+
+  return fillMaskHoles(silhouetteMask, source.width, source.height)
+}
+
+function collectBorderSignalStats(
+  colorDistanceMap: Float32Array,
+  luminanceMap: Float32Array,
+  localMeanMap: Float32Array,
+  localContrastMap: Float32Array,
+  width: number,
+  height: number,
+  ignoredMask: Uint8Array,
+  backgroundLuminance: number,
+) {
+  const distances: number[] = []
+  const luminanceDeltas: number[] = []
+  const localMeanDeltas: number[] = []
+  const contrasts: number[] = []
+  const stride = Math.max(1, Math.floor(Math.max(width, height) / 100))
+
+  const sample = (x: number, y: number) => {
+    const index = y * width + x
+
+    if (ignoredMask[index]) {
+      return
+    }
+
+    distances.push(colorDistanceMap[index])
+    luminanceDeltas.push(Math.abs(luminanceMap[index] - backgroundLuminance))
+    localMeanDeltas.push(Math.abs(localMeanMap[index] - backgroundLuminance))
+    contrasts.push(localContrastMap[index])
+  }
+
+  for (let x = 0; x < width; x += stride) {
+    sample(x, 0)
+    sample(x, height - 1)
+  }
+
+  for (let y = 0; y < height; y += stride) {
+    sample(0, y)
+    sample(width - 1, y)
+  }
+
+  return {
+    distanceP90: percentile(distances, 0.9),
+    luminanceP90: percentile(luminanceDeltas, 0.9),
+    localMeanP90: percentile(localMeanDeltas, 0.9),
+    contrastP90: percentile(contrasts, 0.9),
+  }
+}
+
+function createLocalContrastMap(
+  luminanceMap: Float32Array,
+  width: number,
+  height: number,
+) {
+  const contrasts = new Float32Array(width * height)
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      contrasts[y * width + x] = getLocalContrast(luminanceMap, width, height, x, y)
+    }
+  }
+
+  return contrasts
+}
+
+function floodFillMaskFromBorder(mask: Uint8Array, width: number, height: number) {
+  const visited = new Uint8Array(mask.length)
+  const queue = new Int32Array(mask.length)
+  let queueStart = 0
+  let queueEnd = 0
+
+  const enqueue = (index: number) => {
+    if (!mask[index] || visited[index]) {
+      return
+    }
+
+    visited[index] = 1
+    queue[queueEnd] = index
+    queueEnd += 1
+  }
+
+  for (let x = 0; x < width; x += 1) {
+    enqueue(x)
+    enqueue((height - 1) * width + x)
+  }
+
+  for (let y = 0; y < height; y += 1) {
+    enqueue(y * width)
+    enqueue(y * width + (width - 1))
+  }
+
+  while (queueStart < queueEnd) {
+    const current = queue[queueStart]
+    queueStart += 1
+    const x = current % width
+    const y = Math.floor(current / width)
+
+    for (const neighbor of getNeighborIndexes(current, x, y, width, height)) {
+      enqueue(neighbor)
+    }
+  }
+
+  return visited
+}
+
+function fillMaskHoles(mask: Uint8Array, width: number, height: number) {
+  const backgroundMask = new Uint8Array(mask.length)
+
+  for (let index = 0; index < mask.length; index += 1) {
+    backgroundMask[index] = mask[index] ? 0 : 1
+  }
+
+  const outsideBackground = floodFillMaskFromBorder(backgroundMask, width, height)
+  const filledMask = new Uint8Array(mask)
+
+  for (let index = 0; index < mask.length; index += 1) {
+    if (!mask[index] && !outsideBackground[index]) {
+      filledMask[index] = 1
+    }
+  }
+
+  return filledMask
+}
+
+function closeMask(mask: Uint8Array, width: number, height: number, iterations: number) {
+  return erodeMask(dilateMask(mask, width, height, iterations), width, height, iterations)
+}
+
+function createBoxMeanMap(
+  values: Float32Array,
+  width: number,
+  height: number,
+  radius: number,
+) {
+  const stride = width + 1
+  const integral = new Float64Array((width + 1) * (height + 1))
+
+  for (let y = 1; y <= height; y += 1) {
+    let rowSum = 0
+
+    for (let x = 1; x <= width; x += 1) {
+      rowSum += values[(y - 1) * width + (x - 1)]
+      integral[y * stride + x] = integral[(y - 1) * stride + x] + rowSum
+    }
+  }
+
+  const means = new Float32Array(width * height)
+
+  for (let y = 0; y < height; y += 1) {
+    const minY = Math.max(0, y - radius)
+    const maxY = Math.min(height - 1, y + radius)
+
+    for (let x = 0; x < width; x += 1) {
+      const minX = Math.max(0, x - radius)
+      const maxX = Math.min(width - 1, x + radius)
+      const sum =
+        integral[(maxY + 1) * stride + (maxX + 1)] -
+        integral[minY * stride + (maxX + 1)] -
+        integral[(maxY + 1) * stride + minX] +
+        integral[minY * stride + minX]
+      const area = (maxX - minX + 1) * (maxY - minY + 1)
+
+      means[y * width + x] = sum / area
+    }
+  }
+
+  return means
+}
+
+function getLocalContrast(
+  luminanceMap: Float32Array,
+  width: number,
+  height: number,
+  x: number,
+  y: number,
+) {
+  const index = y * width + x
+  const current = luminanceMap[index]
+  let contrast = 0
+
+  for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+    for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+      if (offsetX === 0 && offsetY === 0) {
+        continue
+      }
+
+      const nextX = x + offsetX
+      const nextY = y + offsetY
+
+      if (nextX < 0 || nextY < 0 || nextX >= width || nextY >= height) {
+        continue
+      }
+
+      contrast = Math.max(
+        contrast,
+        Math.abs(current - luminanceMap[nextY * width + nextX]),
+      )
+    }
+  }
+
+  return contrast
+}
+
+function dilateMask(mask: Uint8Array, width: number, height: number, iterations: number) {
+  let current = mask
+
+  for (let iteration = 0; iteration < iterations; iteration += 1) {
+    const next = new Uint8Array(current.length)
+
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        if (!current[y * width + x]) {
+          continue
+        }
+
+        for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+          for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+            const nextX = x + offsetX
+            const nextY = y + offsetY
+
+            if (nextX < 0 || nextY < 0 || nextX >= width || nextY >= height) {
+              continue
+            }
+
+            next[nextY * width + nextX] = 1
+          }
+        }
+      }
+    }
+
+    current = next
+  }
+
+  return current
+}
+
+function erodeMask(mask: Uint8Array, width: number, height: number, iterations: number) {
+  let current = mask
+
+  for (let iteration = 0; iteration < iterations; iteration += 1) {
+    const next = new Uint8Array(current.length)
+
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        let filled = 1
+
+        for (let offsetY = -1; offsetY <= 1 && filled; offsetY += 1) {
+          for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+            const nextX = x + offsetX
+            const nextY = y + offsetY
+
+            if (
+              nextX < 0 ||
+              nextY < 0 ||
+              nextX >= width ||
+              nextY >= height ||
+              !current[nextY * width + nextX]
+            ) {
+              filled = 0
+              break
+            }
+          }
+        }
+
+        if (filled) {
+          next[y * width + x] = 1
+        }
+      }
+    }
+
+    current = next
+  }
+
+  return current
 }
 
 function estimateBackgroundColor(data: Uint8ClampedArray, width: number, height: number) {
@@ -1440,8 +1877,45 @@ function median(values: number[]) {
     : sorted[middle]
 }
 
+function percentile(values: number[], ratio: number) {
+  if (values.length === 0) {
+    return 0
+  }
+
+  const sorted = [...values].sort((left, right) => left - right)
+  const scaledIndex = (sorted.length - 1) * clampNumber(ratio, 0, 1)
+  const lowerIndex = Math.floor(scaledIndex)
+  const upperIndex = Math.ceil(scaledIndex)
+  const weight = scaledIndex - lowerIndex
+
+  if (lowerIndex === upperIndex) {
+    return sorted[lowerIndex]
+  }
+
+  return sorted[lowerIndex] * (1 - weight) + sorted[upperIndex] * weight
+}
+
 function luminance(r: number, g: number, b: number) {
   return 0.299 * r + 0.587 * g + 0.114 * b
+}
+
+function isLikelyRulerPixel(
+  [r, g, b]: readonly [number, number, number],
+  background: readonly [number, number, number],
+) {
+  const channelSpread = Math.max(r, g, b) - Math.min(r, g, b)
+  const pixelLuminance = luminance(r, g, b)
+  const backgroundLuminance = luminance(...background)
+  const luminanceDelta = backgroundLuminance - pixelLuminance
+  const isNeutralDark = pixelLuminance < 88 && channelSpread <= 28
+  const isWarmDark =
+    luminanceDelta > 36 &&
+    r >= g &&
+    g >= b &&
+    r - b >= 16 &&
+    channelSpread <= 96
+
+  return colorDistance([r, g, b], background) > 28 && (isNeutralDark || isWarmDark)
 }
 
 function colorDistance(

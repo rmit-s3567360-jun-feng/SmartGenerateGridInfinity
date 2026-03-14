@@ -48,6 +48,7 @@ describe('GeneratorPage', () => {
     expect(screen.getByText('Z 内壁厚度')).toBeInTheDocument()
     expect(screen.getByText('隔板厚度')).toBeInTheDocument()
     expect(screen.getByText('隔板高度')).toBeInTheDocument()
+    expect(screen.getAllByRole('slider').length).toBeGreaterThan(0)
   })
 
   it('shows custom divider controls for the generic bin when compartment count increases', () => {
@@ -91,6 +92,19 @@ describe('GeneratorPage', () => {
     expect(screen.getByText('高度单元')).toBeInTheDocument()
   })
 
+  it('redirects removed template routes back to the generic generator', () => {
+    render(
+      <MemoryRouter initialEntries={['/generator/screwdriver-rack']}>
+        <Routes>
+          <Route element={<GeneratorPage />} path="/generator/:templateId" />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(screen.getAllByText('通用收纳盒').length).toBeGreaterThan(0)
+    expect(screen.queryByText('螺丝刀收纳')).not.toBeInTheDocument()
+  })
+
   it('renders the photo outline workflow for the dedicated template', () => {
     render(
       <MemoryRouter initialEntries={['/generator/photo-outline-bin']}>
@@ -104,6 +118,8 @@ describe('GeneratorPage', () => {
     expect(screen.getByText('上传俯拍照片')).toBeInTheDocument()
     expect(screen.getByText('图像叠加')).toBeInTheDocument()
     expect(screen.getByText('物体高度')).toBeInTheDocument()
+    expect(screen.getByText('轮廓模式')).toBeInTheDocument()
+    expect(screen.queryByText('取物凹槽')).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: '下载 L 形标尺 STL' })).toHaveAttribute(
       'href',
       '/downloads/photo-outline-l-ruler-80x60mm.stl',

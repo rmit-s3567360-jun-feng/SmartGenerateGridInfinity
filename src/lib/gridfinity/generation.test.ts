@@ -61,17 +61,14 @@ describe('gridfinity model generation', () => {
     },
   )
 
-  it('rejects impossible screwdriver layouts', () => {
+  it('rejects overly tight generic divider layouts', () => {
     expect(() =>
       generateModel({
-        templateId: 'screwdriver-rack',
+        templateId: 'generic-bin',
         params: {
-          ...templateList.find((template) => template.id === 'screwdriver-rack')!.defaultParams,
-          gridX: 1,
-          gridY: 1,
-          slotCount: 16,
-          rowCount: 3,
-          holeDiameter: 16,
+          ...templateList.find((template) => template.id === 'generic-bin')!.defaultParams,
+          compartmentsX: 2,
+          dividerX1: 2,
         },
         specVersion: defaultGridfinitySpec.version,
       }),

@@ -2,11 +2,12 @@ import { useState } from 'react'
 
 import type {
   AnyTemplateDefinition,
-  ParameterField,
   JsonValue,
+  ParameterField,
   ParameterValues,
   PrimitiveParamValue,
 } from '../lib/gridfinity/types'
+import { NumericFieldControl } from './NumericFieldControl'
 
 interface ParameterPanelProps {
   template: AnyTemplateDefinition
@@ -82,6 +83,25 @@ export function ParameterPanel({
       )
     }
 
+    if (
+      field.min !== undefined &&
+      field.max !== undefined &&
+      field.step !== undefined
+    ) {
+      return (
+        <NumericFieldControl
+          description={field.description}
+          key={field.key}
+          label={field.label}
+          max={field.max}
+          min={field.min}
+          step={field.step}
+          value={value}
+          onChange={(nextValue) => onChange(field.key, nextValue)}
+        />
+      )
+    }
+
     return (
       <label className="form-field" key={field.key}>
         <span>{field.label}</span>
@@ -110,6 +130,7 @@ export function ParameterPanel({
         </button>
       </div>
       <p className="panel__body">{template.summary}</p>
+      <p className="panel__hint">数字参数支持拖动滑杆，方便边调边看 3D 预览。</p>
       {validationErrors.length > 0 ? (
         <div className="error-box" role="alert">
           <strong>参数需要修正</strong>

@@ -1,12 +1,10 @@
-import { booleans, primitives, transforms } from '@jscad/modeling'
+import { booleans, primitives } from '@jscad/modeling'
 import { z } from 'zod'
 
 import {
   createBaseBinSolid,
   createPocketBetween,
-  getInteriorFloorZ,
 } from './base'
-import { evenlySpacedCenters, toRadians } from './helpers'
 import {
   getMemoryCardModeDefaults,
   resolveMemoryCardPlan,
@@ -23,15 +21,12 @@ import type {
   MemoryCardTrayParams,
   ParameterValues,
   ParameterField,
-  PliersHolderParams,
-  ScrewdriverRackParams,
   TemplateId,
   TemplateBuildOutput,
 } from './types'
 
 const { subtract, union } = booleans
-const { cuboid, cylinder } = primitives
-const { rotateX, translate } = transforms
+const { cuboid } = primitives
 
 const baseSchema = z.object({
   gridX: z.coerce.number().int().min(1).max(4),
@@ -106,15 +101,6 @@ const genericBinSchema = baseSchema.extend({
   )
 })
 
-const screwdriverRackSchema = baseSchema.extend({
-  slotCount: z.coerce.number().int().min(2).max(16),
-  holeDiameter: z.coerce.number().min(6).max(18),
-  rowCount: z.coerce.number().int().min(1).max(3),
-  spacing: z.coerce.number().min(3).max(24),
-  tiltDegrees: z.coerce.number().min(0).max(20),
-  handleClearance: z.coerce.number().min(12).max(38),
-})
-
 const memoryCardTraySchema = baseSchema.extend({
   mode: z.enum(['micro-sd-compact', 'sd-compact', 'mixed']),
   quantity: z.coerce.number().int().min(1).max(48),
@@ -133,14 +119,6 @@ const memoryCardTraySchema = baseSchema.extend({
       path: ['sdCount'],
     })
   }
-})
-
-const pliersHolderSchema = baseSchema.extend({
-  toolCount: z.coerce.number().int().min(1).max(6),
-  channelWidth: z.coerce.number().min(12).max(38),
-  channelDepth: z.coerce.number().min(10).max(32),
-  spacing: z.coerce.number().min(4).max(20),
-  handleOpening: z.coerce.number().min(10).max(28),
 })
 
 const photoPointSchema = z.object({
@@ -187,17 +165,17 @@ const photoOutlineAnalysisSchema = z.object({
   detection: z.object({
     foregroundThreshold: z.number().min(10).max(180),
     simplifyTolerance: z.number().min(0.5).max(18),
+    contourMode: z.enum(['detail', 'smooth', 'rounded']),
   }),
 })
 
 const photoOutlineBinSchema = baseSchema.extend({
-  objectHeight: z.coerce.number().min(4).max(84),
+  objectHeight: z.coerce.number().min(0.5).max(84),
   cavityClearance: z.coerce.number().min(0.3).max(4),
   depthClearance: z.coerce.number().min(0).max(8),
-  gripMode: z.enum(['double-sided', 'single-sided', 'auto-side']),
-  singleGripSide: z.enum(['left', 'right']),
   foregroundThreshold: z.coerce.number().min(10).max(180),
   simplifyTolerance: z.coerce.number().min(0.5).max(18),
+  contourMode: z.enum(['detail', 'smooth', 'rounded']),
   analysis: photoOutlineAnalysisSchema.nullable(),
 }).superRefine((value, context) => {
   if (!value.analysis) {
@@ -389,88 +367,6 @@ export function getDefaultGenericDividerOffsets(
   ] as const
 }
 
-function buildScrewdriverRack(
-  params: ScrewdriverRackParams,
-  spec: GridfinitySpec,
-): TemplateBuildOutput {
-  const solid = createBaseBinSolid(params, spec)
-  const metrics = getBinMetrics(params, spec)
-  const topPlateThickness = Math.max(5.5, params.holeDiameter * 0.35)
-  const chamberBottomZ = getInteriorFloorZ(params, spec)
-  const chamberTopZ = metrics.height - topPlateThickness + 0.2
-  const chamberHeight = chamberTopZ - chamberBottomZ
-
-  if (chamberHeight <= 8) {
-    throw new Error('当前高度不足以生成螺丝刀收纳模板。')
-  }
-
-  const chamber = createPocketBetween(
-    Math.max(12, metrics.innerX - 2),
-    Math.max(12, metrics.innerY - 2),
-    chamberBottomZ,
-    chamberTopZ,
-    0,
-    0,
-    Math.max(0.8, metrics.innerRadius - 0.4),
-    metrics.segments,
-  )
-
-  let result = subtract(solid, chamber)
-  const rows = params.rowCount
-  const columns = Math.ceil(params.slotCount / rows)
-  const xLayout = evenlySpacedCenters(
-    columns,
-    metrics.innerX - 4,
-    params.holeDiameter,
-    params.spacing,
-  )
-  const yLayout = evenlySpacedCenters(
-    rows,
-    metrics.innerY - 8,
-    params.holeDiameter + 2,
-    8,
-  )
-  const tilt = toRadians(params.tiltDegrees)
-  const holeLength = Math.max(metrics.innerY + params.handleClearance, 32)
-  const warnings: string[] = []
-
-  if (xLayout.gap < params.spacing && columns > 1) {
-    warnings.push('孔位间距已自动压缩，以适配当前箱体宽度。')
-  }
-
-  const holes = []
-  let created = 0
-
-  for (let row = 0; row < rows; row += 1) {
-    for (let column = 0; column < columns; column += 1) {
-      if (created >= params.slotCount) {
-        break
-      }
-
-      let hole = cylinder({
-        radius: params.holeDiameter / 2,
-        height: holeLength,
-        segments: 28,
-      })
-      hole = rotateX(Math.PI / 2 - tilt, hole)
-      hole = translate(
-        [
-          xLayout.centers[column],
-          yLayout.centers[row] - metrics.innerY * 0.06,
-          metrics.height - topPlateThickness / 2,
-        ],
-        hole,
-      )
-      holes.push(hole)
-      created += 1
-    }
-  }
-
-  result = subtract(result, ...holes)
-
-  return { geometry: result, warnings }
-}
-
 function buildMemoryCardTray(
   params: MemoryCardTrayParams,
   spec: GridfinitySpec,
@@ -516,61 +412,6 @@ function buildMemoryCardTray(
   return {
     geometry: subtract(solid, trayPocket, ...slotPockets, ...gripChannels),
     warnings: plan.warnings,
-  }
-}
-
-function buildPliersHolder(
-  params: PliersHolderParams,
-  spec: GridfinitySpec,
-): TemplateBuildOutput {
-  const solid = createBaseBinSolid(params, spec)
-  const metrics = getBinMetrics(params, spec)
-  const channelBottomZ = Math.max(
-    getInteriorFloorZ(params, spec),
-    metrics.height - params.channelDepth,
-  )
-  const channelLength = Math.max(18, metrics.innerY * 0.72)
-  const xLayout = evenlySpacedCenters(
-    params.toolCount,
-    metrics.innerX - 6,
-    params.channelWidth,
-    params.spacing,
-  )
-  const warnings: string[] = []
-
-  if (xLayout.gap < params.spacing && params.toolCount > 1) {
-    warnings.push('工具槽间距已自动压缩，以适配当前箱体宽度。')
-  }
-
-  const channels = xLayout.centers.flatMap((x) => {
-    const channel = createPocketBetween(
-      params.channelWidth,
-      channelLength,
-      channelBottomZ,
-      metrics.height + 1,
-      x,
-      0,
-      Math.min(2, params.channelWidth * 0.15),
-      24,
-    )
-
-    const frontOpening = createPocketBetween(
-      params.channelWidth * 0.82,
-      params.handleOpening,
-      channelBottomZ,
-      metrics.height + 1.2,
-      x,
-      metrics.outerY / 2 - params.handleOpening / 2,
-      0.6,
-      16,
-    )
-
-    return [channel, frontOpening]
-  })
-
-  return {
-    geometry: subtract(solid, ...channels),
-    warnings,
   }
 }
 
@@ -639,46 +480,6 @@ export const templateDefinitions: Record<TemplateId, AnyTemplateDefinition> = {
       booleanField<GenericBinParams>('labelLip', '标签 lip', '前侧增加标签唇边'),
     ],
     build: buildGenericBin,
-  },
-  'screwdriver-rack': {
-    id: 'screwdriver-rack',
-    name: '螺丝刀收纳',
-    tagline: '带倾角的孔位排布',
-    summary: '顶部开孔、内部留空，适合批量放置精密螺丝刀。',
-    description:
-      '通过孔径、行数和倾角快速生成螺丝刀收纳 rack，兼顾可打印性与密度。',
-    previewFacts: ['顶部孔位', '支持多排', '自动压缩孔距'],
-    schema: screwdriverRackSchema,
-    defaultParams: {
-      gridX: 2,
-      gridY: 2,
-      heightUnits: 6,
-      wallThickness: 2,
-      floorThickness: 2,
-      magnetHoles: true,
-      labelLip: false,
-      slotCount: 8,
-      holeDiameter: 10,
-      rowCount: 2,
-      spacing: 14,
-      tiltDegrees: 10,
-      handleClearance: 24,
-    },
-    fields: [
-      numberField<ScrewdriverRackParams>('gridX', '宽度单元', 'Gridfinity X 方向单元数', 1, 4, 1),
-      numberField<ScrewdriverRackParams>('gridY', '深度单元', 'Gridfinity Y 方向单元数', 1, 4, 1),
-      numberField<ScrewdriverRackParams>('heightUnits', '高度单元', '每单位为 7mm', 2, 12, 1),
-      numberField<ScrewdriverRackParams>('wallThickness', '壁厚', '建议 >= 1.6mm', 1.2, 3.6, 0.2),
-      numberField<ScrewdriverRackParams>('floorThickness', '底厚', '打印友好的底部厚度', 1.2, 5, 0.2),
-      numberField<ScrewdriverRackParams>('slotCount', '孔位数量', '总孔位数量', 2, 16, 1),
-      numberField<ScrewdriverRackParams>('holeDiameter', '孔径', '适配螺丝刀杆径', 6, 18, 0.5),
-      numberField<ScrewdriverRackParams>('rowCount', '排数', '前后排布数量', 1, 3, 1),
-      numberField<ScrewdriverRackParams>('spacing', '目标间距', '孔位之间的目标间距', 3, 24, 1),
-      numberField<ScrewdriverRackParams>('tiltDegrees', '倾角', '顶部孔位后仰角度', 0, 20, 1),
-      numberField<ScrewdriverRackParams>('handleClearance', '手柄避让', '内部留空长度', 12, 38, 1),
-      booleanField<ScrewdriverRackParams>('magnetHoles', '磁铁孔', '底部增加 6x2mm 磁铁孔'),
-    ],
-    build: buildScrewdriverRack,
   },
   'memory-card-tray': {
     id: 'memory-card-tray',
@@ -752,52 +553,14 @@ export const templateDefinitions: Record<TemplateId, AnyTemplateDefinition> = {
     ],
     build: buildMemoryCardTray,
   },
-  'pliers-holder': {
-    id: 'pliers-holder',
-    name: '钳子收纳',
-    tagline: '宽槽 + 前开口',
-    summary: '适合尖嘴钳、斜口钳等常见手工具的槽道式支撑。',
-    description:
-      '通过槽宽、槽深和前部开口尺寸快速生成钳子类工具的托槽式收纳盒。',
-    previewFacts: ['托槽式', '前开口', '自动压缩槽距'],
-    schema: pliersHolderSchema,
-    defaultParams: {
-      gridX: 2,
-      gridY: 2,
-      heightUnits: 4,
-      wallThickness: 2,
-      floorThickness: 2.2,
-      magnetHoles: true,
-      labelLip: false,
-      toolCount: 3,
-      channelWidth: 18,
-      channelDepth: 22,
-      spacing: 10,
-      handleOpening: 16,
-    },
-    fields: [
-      numberField<PliersHolderParams>('gridX', '宽度单元', 'Gridfinity X 方向单元数', 1, 4, 1),
-      numberField<PliersHolderParams>('gridY', '深度单元', 'Gridfinity Y 方向单元数', 1, 4, 1),
-      numberField<PliersHolderParams>('heightUnits', '高度单元', '每单位为 7mm', 2, 12, 1),
-      numberField<PliersHolderParams>('wallThickness', '壁厚', '建议 >= 1.6mm', 1.2, 3.6, 0.2),
-      numberField<PliersHolderParams>('floorThickness', '底厚', '打印友好的底部厚度', 1.2, 5, 0.2),
-      numberField<PliersHolderParams>('toolCount', '工具数量', '托槽数量', 1, 6, 1),
-      numberField<PliersHolderParams>('channelWidth', '槽宽', '单个托槽宽度', 12, 38, 0.5),
-      numberField<PliersHolderParams>('channelDepth', '槽深', '从顶部向下切入深度', 10, 32, 0.5),
-      numberField<PliersHolderParams>('spacing', '目标间距', '工具槽之间的目标间距', 4, 20, 0.5),
-      numberField<PliersHolderParams>('handleOpening', '前开口', '前侧开口深度', 10, 28, 0.5),
-      booleanField<PliersHolderParams>('magnetHoles', '磁铁孔', '底部增加 6x2mm 磁铁孔'),
-    ],
-    build: buildPliersHolder,
-  },
   'photo-outline-bin': {
     id: 'photo-outline-bin',
     name: '照片轮廓收纳',
     tagline: '上传俯拍照片后自动识别轮廓',
-    summary: '基于 L 形标尺完成尺度校准，抽取关键点轮廓并生成首版型腔收纳。 ',
+    summary: '基于 L 形标尺完成尺度校准，抽取关键点轮廓并生成首版型腔收纳。',
     description:
-      '首版支持单物体俯拍、L 形标尺校准、关键点拖拽修正，以及 0° / 90° 自动尺寸搜索。',
-    previewFacts: ['L 形标尺校准', '关键点拖拽审查', '自动搜索最小外部尺寸'],
+      '首版支持单物体俯拍、L 形标尺校准、关键点拖拽修正、轮廓模式切换，以及 0° / 90° 自动尺寸搜索。',
+    previewFacts: ['L 形标尺校准', '轮廓模式切换', '自动搜索最小外部尺寸'],
     schema: photoOutlineBinSchema,
     defaultParams: photoOutlineDefaultParams,
     fields: [],

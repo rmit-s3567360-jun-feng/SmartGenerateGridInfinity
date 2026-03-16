@@ -1,6 +1,12 @@
 import { booleans, measurements, primitives } from '@jscad/modeling'
 
-import { createBaseBinSolid, createPocketBetween, getBottomFootLayout } from './base'
+import {
+  createBaseBinSolid,
+  createGridfinityMountBase,
+  createGridfinityStackableBlock,
+  createPocketBetween,
+  getBottomFootLayout,
+} from './base'
 import { defaultGridfinitySpec } from './spec'
 
 const { intersect } = booleans
@@ -128,5 +134,82 @@ describe('gridfinity base geometry', () => {
 
     expect(lowerMaxX - lowerMinX).toBeCloseTo(20, 1)
     expect(upperMaxX - upperMinX).toBeCloseTo(20, 1)
+  })
+
+  it('can taper the retrofit mount base to a narrower top footprint', () => {
+    const geometry = createGridfinityMountBase(
+      2,
+      1,
+      14,
+      false,
+      defaultGridfinitySpec,
+      [28, 18],
+    )
+    const shoulderSlice = intersect(
+      geometry,
+      cuboid({
+        size: [120, 120, 0.3],
+        center: [0, 0, defaultGridfinitySpec.footHeight + 0.15],
+      }),
+    )
+    const topSlice = intersect(
+      geometry,
+      cuboid({
+        size: [120, 120, 0.04],
+        center: [0, 0, 13.98],
+      }),
+    )
+    const [[shoulderMinX, shoulderMinY], [shoulderMaxX, shoulderMaxY]] =
+      measureBoundingBox(shoulderSlice) as [
+        [number, number, number],
+        [number, number, number],
+      ]
+    const [[topMinX, topMinY], [topMaxX, topMaxY]] = measureBoundingBox(topSlice) as [
+      [number, number, number],
+      [number, number, number],
+    ]
+
+    expect(shoulderMaxX - shoulderMinX).toBeCloseTo(83.5, 1)
+    expect(topMaxX - topMinX).toBeCloseTo(28, 0)
+    expect(topMaxY - topMinY).toBeCloseTo(18, 0)
+    expect(topMaxX - topMinX).toBeLessThan(shoulderMaxX - shoulderMinX - 20)
+    expect(topMaxY - topMinY).toBeLessThan(shoulderMaxY - shoulderMinY - 20)
+  })
+
+  it('adds a standard stacking lip on top of a solid block when enabled', () => {
+    const totalHeight = 21
+    const geometry = createGridfinityStackableBlock(
+      1,
+      1,
+      totalHeight,
+      false,
+      true,
+      defaultGridfinitySpec,
+    )
+    const bodySlice = intersect(
+      geometry,
+      cuboid({
+        size: [60, 60, 0.2],
+        center: [0, 0, totalHeight - defaultGridfinitySpec.footHeight - 0.1],
+      }),
+    )
+    const lipTopSlice = intersect(
+      geometry,
+      cuboid({
+        size: [60, 60, 0.2],
+        center: [0, 0, totalHeight - 0.1],
+      }),
+    )
+    const [[bodyMinX], [bodyMaxX]] = measureBoundingBox(bodySlice) as [
+      [number, number, number],
+      [number, number, number],
+    ]
+    const [[lipMinX], [lipMaxX]] = measureBoundingBox(lipTopSlice) as [
+      [number, number, number],
+      [number, number, number],
+    ]
+
+    expect(bodyMaxX - bodyMinX).toBeCloseTo(defaultGridfinitySpec.outerUnitSize, 1)
+    expect(lipMaxX - lipMinX).toBeLessThan(bodyMaxX - bodyMinX - 4)
   })
 })

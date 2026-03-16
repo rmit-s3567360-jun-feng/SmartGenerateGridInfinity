@@ -119,7 +119,7 @@ export function ParameterPanel({
   }
 
   return (
-    <section className="panel">
+    <section className="panel panel--controls">
       <div className="panel__header">
         <div>
           <p className="panel__eyebrow">参数调节</p>

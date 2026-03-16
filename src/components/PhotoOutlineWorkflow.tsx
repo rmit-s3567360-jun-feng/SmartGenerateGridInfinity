@@ -173,7 +173,7 @@ export function PhotoOutlineWorkflow({
 
     onChange(key, normalizedValue)
 
-    if (!uploadedRaster || typeof normalizedValue !== 'number') {
+    if (!uploadedRaster) {
       return
     }
 

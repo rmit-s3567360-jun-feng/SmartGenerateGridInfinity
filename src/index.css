@@ -73,17 +73,25 @@ ul {
 
 .landing-page,
 .generator-page {
-  width: min(1280px, calc(100vw - 40px));
+  width: min(1440px, calc(100vw - clamp(20px, 4vw, 48px)));
   margin: 0 auto;
-  padding: 28px 0 64px;
+  padding: clamp(16px, 2.8vw, 28px) 0 64px;
 }
 
 .hero {
   display: grid;
-  grid-template-columns: 1.4fr 0.9fr;
-  gap: 24px;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.85fr);
+  gap: clamp(18px, 2vw, 24px);
   align-items: stretch;
   padding-top: 24px;
+}
+
+.hero > *,
+.workspace > *,
+.photo-workspace > *,
+.stl-workspace > *,
+.info-strip > * {
+  min-width: 0;
 }
 
 .hero__content,
@@ -233,7 +241,7 @@ ul {
 
 .template-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
   gap: 18px;
   margin-top: 20px;
 }
@@ -269,7 +277,7 @@ ul {
   border-radius: 24px;
   padding: 18px 22px;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: 18px;
 }
 
@@ -317,20 +325,45 @@ ul {
 .workspace {
   margin-top: 18px;
   display: grid;
-  grid-template-columns: minmax(310px, 360px) minmax(0, 1fr) minmax(280px, 320px);
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr) minmax(260px, 320px);
+  grid-template-areas: 'controls preview info';
   gap: 18px;
   align-items: start;
 }
 
 .workspace--photo {
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+  grid-template-areas: 'photo info';
 }
 
 .photo-workspace {
   display: grid;
-  grid-template-columns: minmax(320px, 360px) minmax(0, 1fr);
+  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
   gap: 18px;
   align-items: start;
+}
+
+.stl-workspace {
+  display: grid;
+  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.workspace > .panel--controls {
+  grid-area: controls;
+}
+
+.workspace > .preview-shell {
+  grid-area: preview;
+}
+
+.workspace > .panel--info {
+  grid-area: info;
+}
+
+.workspace--photo > .photo-workspace {
+  grid-area: photo;
 }
 
 .photo-results-column {
@@ -339,7 +372,27 @@ ul {
   gap: 18px;
 }
 
+.stl-results-column {
+  min-width: 0;
+  display: grid;
+  gap: 18px;
+}
+
 .photo-control-panel {
+  position: sticky;
+  top: 18px;
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+}
+
+.stl-control-panel {
+  position: sticky;
+  top: 18px;
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+}
+
+.panel--controls {
   position: sticky;
   top: 18px;
   max-height: calc(100vh - 24px);
@@ -536,6 +589,7 @@ ul {
 }
 
 .photo-meta-grid,
+.stl-meta-grid,
 .photo-points-table__grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -544,6 +598,34 @@ ul {
 
 .photo-meta-grid {
   margin-top: 18px;
+}
+
+.stl-meta-grid {
+  margin-top: 18px;
+}
+
+.stl-rotation-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.stl-rotation-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.stl-rotation-card strong {
+  font-size: 1.2rem;
+}
+
+.stl-guidance-panel {
+  min-height: 0;
 }
 
 .photo-review-panel {
@@ -633,14 +715,14 @@ ul {
 }
 
 .preview-shell {
-  min-height: 720px;
+  min-height: clamp(460px, 62vh, 720px);
   display: grid;
   gap: 18px;
 }
 
 .preview-canvas {
   position: relative;
-  min-height: 620px;
+  min-height: clamp(360px, 54vh, 620px);
   border-radius: 24px;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -774,15 +856,27 @@ ul {
   color: var(--danger);
 }
 
+@media (max-width: 1320px) {
+  .workspace {
+    grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+    grid-template-areas:
+      'controls preview'
+      'info preview';
+  }
+}
+
 @media (max-width: 1120px) {
   .hero,
   .workspace,
-  .template-grid,
-  .info-strip,
+  .workspace--photo,
   .photo-workspace,
+  .stl-workspace,
   .photo-meta-grid,
+  .stl-meta-grid,
+  .stl-rotation-grid,
   .photo-points-table__grid {
     grid-template-columns: 1fr;
+    grid-template-areas: none;
   }
 
   .preview-shell {
@@ -797,6 +891,25 @@ ul {
     position: static;
     max-height: none;
     overflow: visible;
+  }
+
+  .stl-control-panel {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .panel--controls {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .workspace > .panel--controls,
+  .workspace > .preview-shell,
+  .workspace > .panel--info,
+  .workspace--photo > .photo-workspace {
+    grid-area: auto;
   }
 }
 
@@ -829,5 +942,21 @@ ul {
 
   .template-tabs {
     padding: 8px;
+  }
+
+  .template-tab {
+    flex: 1 1 100%;
+    text-align: center;
+  }
+
+  .axis-legend {
+    left: 12px;
+    right: 12px;
+    justify-content: center;
+    border-radius: 18px;
+  }
+
+  .axis-legend__origin {
+    text-align: center;
   }
 }

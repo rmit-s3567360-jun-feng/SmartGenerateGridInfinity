@@ -14,6 +14,14 @@ import {
   photoOutlineDefaultParams,
 } from './photoOutline'
 import { defaultGridfinitySpec, getBinMetrics } from './spec'
+import {
+  buildStlCavityBin,
+  stlCavityBinDefaultParams,
+} from './stlCavityBin'
+import {
+  buildStlRetrofit,
+  stlRetrofitDefaultParams,
+} from './stlRetrofit'
 import type {
   AnyTemplateDefinition,
   GenericBinParams,
@@ -23,6 +31,7 @@ import type {
   ParameterField,
   TemplateId,
   TemplateBuildOutput,
+  TemplateBuildContext,
 } from './types'
 
 const { subtract, union } = booleans
@@ -196,9 +205,79 @@ const photoOutlineBinSchema = baseSchema.extend({
   }
 })
 
+const quarterTurnSchema = z.union([
+  z.literal(0),
+  z.literal(1),
+  z.literal(2),
+  z.literal(3),
+])
+
+const importedStlSourceSummarySchema = z.object({
+  assetId: z.string().min(1),
+  name: z.string().min(1),
+  format: z.enum(['ascii', 'binary']),
+  sizeBytes: z.number().int().positive(),
+  triangleCount: z.number().int().positive(),
+  originalBounds: z.object({
+    min: z.tuple([z.number(), z.number(), z.number()]),
+    max: z.tuple([z.number(), z.number(), z.number()]),
+    size: z.tuple([z.number(), z.number(), z.number()]),
+  }),
+  originalSizeMm: z.tuple([z.number().positive(), z.number().positive(), z.number().positive()]),
+})
+
+const stlRetrofitSchema = z.object({
+  source: importedStlSourceSummarySchema.nullable(),
+  sizeMode: z.enum(['auto', 'locked']),
+  gridX: z.coerce.number().int().min(1).max(8),
+  gridY: z.coerce.number().int().min(1).max(8),
+  heightUnits: z.coerce.number().int().min(2).max(24),
+  rotationX: quarterTurnSchema,
+  rotationY: quarterTurnSchema,
+  rotationZ: quarterTurnSchema,
+  cutDepth: z.coerce.number().min(0.5).max(120),
+  footprintMargin: z.coerce.number().min(0).max(16),
+  minAdapterThickness: z.coerce.number().min(0.5).max(24),
+  magnetHoles: z.boolean(),
+  stackingLip: z.boolean(),
+}).superRefine((value, context) => {
+  if (!value.source) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: '请先上传 STL 模型。',
+      path: ['source'],
+    })
+  }
+})
+
+const stlCavityBinSchema = z.object({
+  source: importedStlSourceSummarySchema.nullable(),
+  sizeMode: z.enum(['auto', 'locked']),
+  gridX: z.coerce.number().int().min(1).max(8),
+  gridY: z.coerce.number().int().min(1).max(8),
+  heightUnits: z.coerce.number().int().min(2).max(24),
+  rotationX: quarterTurnSchema,
+  rotationY: quarterTurnSchema,
+  rotationZ: quarterTurnSchema,
+  wallThickness: z.coerce.number().min(1.2).max(3.6),
+  floorThickness: z.coerce.number().min(1.2).max(5),
+  xyClearance: z.coerce.number().min(0).max(4),
+  zClearance: z.coerce.number().min(0).max(12),
+  magnetHoles: z.boolean(),
+}).superRefine((value, context) => {
+  if (!value.source) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: '请先上传 STL 模型。',
+      path: ['source'],
+    })
+  }
+})
+
 function buildGenericBin(
   params: GenericBinParams,
   spec: GridfinitySpec,
+  _context: TemplateBuildContext,
 ): TemplateBuildOutput {
   const solid = createBaseBinSolid(params, spec)
   const metrics = getBinMetrics(params, spec)
@@ -370,6 +449,7 @@ export function getDefaultGenericDividerOffsets(
 function buildMemoryCardTray(
   params: MemoryCardTrayParams,
   spec: GridfinitySpec,
+  _context: TemplateBuildContext,
 ): TemplateBuildOutput {
   const plan = resolveMemoryCardPlan(params, spec)
   const solid = createBaseBinSolid(plan.resolvedParams, spec)
@@ -565,6 +645,32 @@ export const templateDefinitions: Record<TemplateId, AnyTemplateDefinition> = {
     defaultParams: photoOutlineDefaultParams,
     fields: [],
     build: buildPhotoOutlineBin,
+  },
+  'stl-cavity-bin': {
+    id: 'stl-cavity-bin',
+    name: 'STL 型腔收纳',
+    tagline: '导入物品 STL 后生成标准矩形 Gridfinity 型腔盒',
+    summary: '导入被收纳物 STL、旋转摆正、自动推荐尺寸，并在标准 Gridfinity 盒体内部挖出对应型腔。',
+    description:
+      '首版支持 ASCII / Binary STL，按 90° 旋转摆正后生成标准矩形外壳，并使用真实 STL 几何减去型腔。',
+    previewFacts: ['导入 STL', '真实 STL 负形', '标准矩形外壳'],
+    schema: stlCavityBinSchema,
+    defaultParams: stlCavityBinDefaultParams,
+    fields: [],
+    build: buildStlCavityBin,
+  },
+  'stl-retrofit': {
+    id: 'stl-retrofit',
+    name: 'STL 改底适配',
+    tagline: '导入模型后规整为 Gridfinity 标准矩形实体',
+    summary: '导入 STL、旋转摆正、自动推荐占位，并规整为标准矩形外形与底部脚位。',
+    description:
+      '首版支持 ASCII / Binary STL，按 90° 旋转摆正后规整为标准矩形外形；顶部默认保持平顶，可选标准堆叠口，并自动补齐到 Gridfinity 标准高度。',
+    previewFacts: ['导入 STL', '90° 旋转摆正', '标准矩形外形'],
+    schema: stlRetrofitSchema,
+    defaultParams: stlRetrofitDefaultParams,
+    fields: [],
+    build: buildStlRetrofit,
   },
 }
 

@@ -7,8 +7,10 @@ import { getTemplateDefinition } from '../lib/gridfinity/templates'
 import type {
   GenerationRequest,
   GenerationResult,
+  ImportedStlSourceSummary,
   ParameterValues,
   TemplateId,
+  WorkerRequest,
   WorkerResponse,
 } from '../lib/gridfinity/types'
 import { useDebouncedValue } from './useDebouncedValue'
@@ -25,6 +27,7 @@ export function useModelGenerator(
   const [generation, setGeneration] = useState<GenerationResult | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
+  const [isImporting, setIsImporting] = useState(false)
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
   const workerRef = useRef<Worker | null>(null)
   const requestIdRef = useRef(0)
@@ -75,7 +78,10 @@ export function useModelGenerator(
     }
   }, [])
 
-  function postWorkerRequest(kind: 'generate' | 'export', payload: GenerationRequest) {
+  function postWorkerRequest(
+    request: WorkerRequest,
+    transfer: Transferable[] = [],
+  ) {
     return new Promise<WorkerResponse>((resolve, reject) => {
       const worker = workerRef.current
 
@@ -84,17 +90,22 @@ export function useModelGenerator(
         return
       }
 
-      const requestId = requestIdRef.current + 1
-      requestIdRef.current = requestId
-      pendingRequestsRef.current.set(requestId, { resolve, reject })
-      worker.postMessage({ kind, requestId, payload })
+      pendingRequestsRef.current.set(request.requestId, { resolve, reject })
+      worker.postMessage(request, transfer)
     })
+  }
+
+  function createRequestId() {
+    const requestId = requestIdRef.current + 1
+    requestIdRef.current = requestId
+    return requestId
   }
 
   useEffect(() => {
     const parsed = template.schema.safeParse(debouncedParams)
 
     if (!parsed.success) {
+      generationSequenceRef.current += 1
       setIsGenerating(false)
       setGeneration(null)
       setRuntimeError(null)
@@ -111,7 +122,13 @@ export function useModelGenerator(
     setIsGenerating(true)
     setRuntimeError(null)
 
-    postWorkerRequest('generate', payload)
+    const requestId = createRequestId()
+
+    postWorkerRequest({
+      kind: 'generate',
+      requestId,
+      payload,
+    })
       .then((response) => {
         if (generationSequenceRef.current !== sequence) {
           return
@@ -150,10 +167,14 @@ export function useModelGenerator(
     setRuntimeError(null)
 
     try {
-      const response = await postWorkerRequest('export', {
-        templateId,
-        params: parsed.data,
-        specVersion: defaultGridfinitySpec.version,
+      const response = await postWorkerRequest({
+        kind: 'export',
+        requestId: createRequestId(),
+        payload: {
+          templateId,
+          params: parsed.data,
+          specVersion: defaultGridfinitySpec.version,
+        },
       })
 
       if (response.kind !== 'export-success') {
@@ -170,13 +191,48 @@ export function useModelGenerator(
     }
   }
 
+  async function importStlSource(file: File) {
+    const bytes = await file.arrayBuffer()
+
+    setIsImporting(true)
+    setRuntimeError(null)
+
+    try {
+      const response = await postWorkerRequest(
+        {
+          kind: 'import-stl',
+          requestId: createRequestId(),
+          payload: {
+            fileName: file.name,
+            bytes,
+          },
+        },
+        [bytes],
+      )
+
+      if (response.kind !== 'import-stl-success') {
+        throw new Error('导入 STL 失败。')
+      }
+
+      return response.summary as ImportedStlSourceSummary
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '导入 STL 失败。'
+      setRuntimeError(message)
+      throw error
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
   return {
     generation,
     isGenerating,
     isExporting,
+    isImporting,
     runtimeError,
     validationErrors,
     isPreviewPending,
     exportModel,
+    importStlSource,
   }
 }

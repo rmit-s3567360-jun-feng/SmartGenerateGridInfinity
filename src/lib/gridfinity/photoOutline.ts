@@ -13,6 +13,7 @@ import type {
   PhotoOutlineRulerDetection,
   PhotoOutlineSource,
   PhotoPoint,
+  TemplateBuildContext,
   TemplateBuildOutput,
 } from './types'
 
@@ -463,6 +464,7 @@ export function resolvePhotoOutlinePlan(
 export function buildPhotoOutlineBin(
   params: PhotoOutlineBinParams,
   spec: GridfinitySpec,
+  _context: TemplateBuildContext,
 ): TemplateBuildOutput {
   const plan = resolvePhotoOutlinePlan(params, spec)
   const solid = createBaseBinSolid(plan.resolvedParams, spec)

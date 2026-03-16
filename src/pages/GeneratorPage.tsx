@@ -4,6 +4,8 @@ import { Link, Navigate, useParams } from 'react-router-dom'
 import { ParameterPanel } from '../components/ParameterPanel'
 import { PhotoOutlineWorkflow } from '../components/PhotoOutlineWorkflow'
 import { PreviewCanvas } from '../components/PreviewCanvas'
+import { StlCavityWorkflow } from '../components/StlCavityWorkflow'
+import { StlRetrofitWorkflow } from '../components/StlRetrofitWorkflow'
 import { useModelGenerator } from '../hooks/useModelGenerator'
 import {
   getMemoryCardRecommendationSummary,
@@ -14,6 +16,8 @@ import {
   getPhotoOutlineRecommendationSummary,
   PHOTO_OUTLINE_RULER_DOWNLOAD_PATH,
 } from '../lib/gridfinity/photoOutline'
+import { resolveStlCavityBinPlan } from '../lib/gridfinity/stlCavityBin'
+import { resolveStlRetrofitPlan } from '../lib/gridfinity/stlRetrofit'
 import { templateCatalog } from '../lib/gridfinity/templateCatalog'
 import {
   defaultGridfinitySpec,
@@ -30,6 +34,8 @@ import type {
   MemoryCardTrayParams,
   ParameterValues,
   PhotoOutlineBinParams,
+  StlCavityBinParams,
+  StlRetrofitParams,
   TemplateDefinition,
   TemplateId,
   JsonValue,
@@ -54,7 +60,9 @@ function isTemplateId(value: string | undefined): value is TemplateId {
   return (
     value === 'generic-bin' ||
     value === 'memory-card-tray' ||
-    value === 'photo-outline-bin'
+    value === 'photo-outline-bin' ||
+    value === 'stl-cavity-bin' ||
+    value === 'stl-retrofit'
   )
 }
 
@@ -72,11 +80,17 @@ export function GeneratorPage() {
   const [rawParams, setRawParams] = useState<ParameterValues>(template.defaultParams)
   const photoParams =
     templateId === 'photo-outline-bin' ? (rawParams as PhotoOutlineBinParams) : null
+  const stlCavityParams =
+    templateId === 'stl-cavity-bin' ? (rawParams as StlCavityBinParams) : null
+  const stlParams =
+    templateId === 'stl-retrofit' ? (rawParams as StlRetrofitParams) : null
   const {
     exportModel,
+    importStlSource,
     generation,
     isExporting,
     isGenerating,
+    isImporting,
     isPreviewPending,
     runtimeError,
     validationErrors,
@@ -124,17 +138,57 @@ export function GeneratorPage() {
           }
         })()
       : null
+  const stlRetrofitPlan =
+    templateId === 'stl-retrofit'
+      ? (() => {
+          try {
+            const stlTemplate = template as TemplateDefinition<StlRetrofitParams>
+            const parsed = stlTemplate.schema.safeParse(rawParams)
+
+            if (!parsed.success) {
+              return null
+            }
+
+            return resolveStlRetrofitPlan(parsed.data, defaultGridfinitySpec)
+          } catch {
+            return null
+          }
+        })()
+      : null
+  const stlCavityPlan =
+    templateId === 'stl-cavity-bin'
+      ? (() => {
+          try {
+            const stlTemplate = template as TemplateDefinition<StlCavityBinParams>
+            const parsed = stlTemplate.schema.safeParse(rawParams)
+
+            if (!parsed.success) {
+              return null
+            }
+
+            return resolveStlCavityBinPlan(parsed.data, defaultGridfinitySpec)
+          } catch {
+            return null
+          }
+        })()
+      : null
   const currentGridX =
     memoryCardSummary?.size.gridX ??
     photoOutlineSummary?.size.gridX ??
+    stlCavityPlan?.size.gridX ??
+    stlRetrofitPlan?.size.gridX ??
     Number(rawParams.gridX ?? template.defaultParams.gridX)
   const currentGridY =
     memoryCardSummary?.size.gridY ??
     photoOutlineSummary?.size.gridY ??
+    stlCavityPlan?.size.gridY ??
+    stlRetrofitPlan?.size.gridY ??
     Number(rawParams.gridY ?? template.defaultParams.gridY)
   const currentHeightUnits =
     memoryCardSummary?.size.heightUnits ??
     photoOutlineSummary?.size.heightUnits ??
+    stlCavityPlan?.size.heightUnits ??
+    stlRetrofitPlan?.size.heightUnits ??
     Number(rawParams.heightUnits ?? template.defaultParams.heightUnits)
 
   function handleParamChange(key: string, value: JsonValue) {
@@ -212,6 +266,38 @@ export function GeneratorPage() {
         }
       }
 
+      if (templateId === 'stl-retrofit') {
+        if (
+          key === 'gridX' ||
+          key === 'gridY' ||
+          key === 'heightUnits'
+        ) {
+          next.sizeMode = 'locked'
+        }
+
+        if (key === 'sizeMode' && value === 'locked' && stlRetrofitPlan) {
+          next.gridX = stlRetrofitPlan.size.gridX
+          next.gridY = stlRetrofitPlan.size.gridY
+          next.heightUnits = stlRetrofitPlan.size.heightUnits
+        }
+      }
+
+      if (templateId === 'stl-cavity-bin') {
+        if (
+          key === 'gridX' ||
+          key === 'gridY' ||
+          key === 'heightUnits'
+        ) {
+          next.sizeMode = 'locked'
+        }
+
+        if (key === 'sizeMode' && value === 'locked' && stlCavityPlan) {
+          next.gridX = stlCavityPlan.size.gridX
+          next.gridY = stlCavityPlan.size.gridY
+          next.heightUnits = stlCavityPlan.size.heightUnits
+        }
+      }
+
       return next
     })
   }
@@ -267,8 +353,16 @@ export function GeneratorPage() {
         ))}
       </nav>
 
-      <section className={templateId === 'photo-outline-bin' ? 'workspace workspace--photo' : 'workspace'}>
-          {templateId === 'photo-outline-bin' ? (
+      <section
+        className={
+          templateId === 'photo-outline-bin' ||
+          templateId === 'stl-retrofit' ||
+          templateId === 'stl-cavity-bin'
+            ? 'workspace workspace--photo'
+            : 'workspace'
+        }
+      >
+        {templateId === 'photo-outline-bin' ? (
           <PhotoOutlineWorkflow
             generation={generation}
             isGenerating={isGenerating}
@@ -279,6 +373,34 @@ export function GeneratorPage() {
             }}
             validationErrors={validationErrors}
             values={photoParams as PhotoOutlineBinParams}
+          />
+        ) : templateId === 'stl-cavity-bin' ? (
+          <StlCavityWorkflow
+            generation={generation}
+            isGenerating={isGenerating}
+            isImporting={isImporting}
+            isPreviewPending={isPreviewPending}
+            onChange={handleParamChange}
+            onImport={importStlSource}
+            onReset={() => {
+              setRawParams(template.defaultParams)
+            }}
+            validationErrors={validationErrors}
+            values={stlCavityParams as StlCavityBinParams}
+          />
+        ) : templateId === 'stl-retrofit' ? (
+          <StlRetrofitWorkflow
+            generation={generation}
+            isGenerating={isGenerating}
+            isImporting={isImporting}
+            isPreviewPending={isPreviewPending}
+            onChange={handleParamChange}
+            onImport={importStlSource}
+            onReset={() => {
+              setRawParams(template.defaultParams)
+            }}
+            validationErrors={validationErrors}
+            values={stlParams as StlRetrofitParams}
           />
         ) : (
           <>
@@ -385,6 +507,52 @@ export function GeneratorPage() {
             </div>
           ) : null}
 
+          {stlCavityPlan ? (
+            <div className="info-section">
+              <h3>{stlCavityPlan.isAutoSized ? '自动推荐尺寸' : '固定外部尺寸'}</h3>
+              <ul>
+                <li>
+                  推荐尺寸: {stlCavityPlan.size.gridX} x {stlCavityPlan.size.gridY} x{' '}
+                  {stlCavityPlan.size.heightUnits}
+                </li>
+                <li>
+                  旋转后尺寸: {stlCavityPlan.rotatedSizeMm[0].toFixed(1)} x{' '}
+                  {stlCavityPlan.rotatedSizeMm[1].toFixed(1)} x{' '}
+                  {stlCavityPlan.rotatedSizeMm[2].toFixed(1)} mm
+                </li>
+                <li>
+                  型腔占位: {stlCavityPlan.cavitySizeMm[0].toFixed(1)} x{' '}
+                  {stlCavityPlan.cavitySizeMm[1].toFixed(1)} x{' '}
+                  {stlCavityPlan.cavitySizeMm[2].toFixed(1)} mm
+                </li>
+                <li>顶部余量: {stlCavityPlan.topClearanceMm.toFixed(1)} mm</li>
+                <li>外形规则: 标准矩形外壳 + STL 负形</li>
+              </ul>
+            </div>
+          ) : null}
+
+          {stlRetrofitPlan ? (
+            <div className="info-section">
+              <h3>{stlRetrofitPlan.isAutoSized ? '自动推荐尺寸' : '固定外部尺寸'}</h3>
+              <ul>
+                <li>
+                  推荐尺寸: {stlRetrofitPlan.size.gridX} x {stlRetrofitPlan.size.gridY} x{' '}
+                  {stlRetrofitPlan.size.heightUnits}
+                </li>
+                <li>
+                  旋转后尺寸: {stlRetrofitPlan.rotatedSizeMm[0].toFixed(1)} x{' '}
+                  {stlRetrofitPlan.rotatedSizeMm[1].toFixed(1)} x{' '}
+                  {stlRetrofitPlan.rotatedSizeMm[2].toFixed(1)} mm
+                </li>
+                <li>切除深度: {stlParams ? stlParams.cutDepth.toFixed(1) : '0.0'} mm</li>
+                <li>底座高度: {stlRetrofitPlan.baseHeightMm.toFixed(1)} mm</li>
+                <li>外形规则: 规整为标准矩形实体</li>
+                <li>顶部规则: {stlParams?.stackingLip ? '标准堆叠口' : '标准平顶'}</li>
+                <li>总高度: {stlRetrofitPlan.totalHeightMm.toFixed(1)} mm</li>
+              </ul>
+            </div>
+          ) : null}
+
           {templateId === 'photo-outline-bin' ? (
             <div className="info-section">
               <h3>标尺校准</h3>
@@ -410,6 +578,32 @@ export function GeneratorPage() {
                 </li>
                 <li>A4 底纸: 当前 V1 仍以内嵌 L 标尺校准，角标供后续整页校准升级</li>
                 <li>首版边界: 单物体、俯拍、干净背景、同平面校准</li>
+              </ul>
+            </div>
+          ) : null}
+
+          {templateId === 'stl-cavity-bin' ? (
+            <div className="info-section">
+              <h3>源模型状态</h3>
+              <ul>
+                <li>上传状态: {stlCavityParams?.source ? '已导入' : '等待上传'}</li>
+                <li>旋转限制: 仅支持 X / Y / Z 的 90° 步进旋转</li>
+                <li>输入边界: 仅支持单个封闭实体 STL</li>
+                <li>型腔策略: 使用真实 STL 几何减去内部负形</li>
+                <li>开口策略: 顶部入口直接贯通到顶面</li>
+              </ul>
+            </div>
+          ) : null}
+
+          {templateId === 'stl-retrofit' ? (
+            <div className="info-section">
+              <h3>源模型状态</h3>
+              <ul>
+                <li>上传状态: {stlParams?.source ? '已导入' : '等待上传'}</li>
+                <li>旋转限制: 仅支持 X / Y / Z 的 90° 步进旋转</li>
+                <li>输入边界: 仅支持单个封闭实体 STL</li>
+                <li>外形策略: 整体外形会规整为标准矩形</li>
+                <li>高度策略: 通过补高标准实体对齐到标准 7mm 单位</li>
               </ul>
             </div>
           ) : null}

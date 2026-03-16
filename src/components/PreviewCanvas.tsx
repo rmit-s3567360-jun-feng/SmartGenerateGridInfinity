@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   AmbientLight,
   AxesHelper,
@@ -40,6 +40,7 @@ export function PreviewCanvas({
   const modelGroupRef = useRef<Group | null>(null)
   const meshRef = useRef<Mesh | null>(null)
   const fitViewRef = useRef<(() => void) | null>(null)
+  const [rendererError, setRendererError] = useState<string | null>(null)
 
   useEffect(() => {
     const container = containerRef.current
@@ -48,6 +49,7 @@ export function PreviewCanvas({
       return
     }
 
+    let renderer: WebGLRenderer
     const scene = new Scene()
     scene.background = new Color('#07131e')
 
@@ -56,9 +58,15 @@ export function PreviewCanvas({
     camera.position.set(150, -160, 110)
     cameraRef.current = camera
 
-    const renderer = new WebGLRenderer({ antialias: true })
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
-    container.appendChild(renderer.domElement)
+    try {
+      renderer = new WebGLRenderer({ antialias: true })
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+      container.appendChild(renderer.domElement)
+      setRendererError(null)
+    } catch {
+      setRendererError('当前环境不支持 WebGL 预览，参数编辑和 STL 导出仍可继续。')
+      return
+    }
 
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
@@ -142,7 +150,9 @@ export function PreviewCanvas({
       mesh.geometry.dispose()
       ;(mesh.material as MeshStandardMaterial).dispose()
       renderer.dispose()
-      container.removeChild(renderer.domElement)
+      if (container.contains(renderer.domElement)) {
+        container.removeChild(renderer.domElement)
+      }
     }
   }, [])
 
@@ -250,7 +260,9 @@ export function PreviewCanvas({
           <span className="axis-legend__item axis-legend__item--z">Z</span>
           <span className="axis-legend__origin">原点: 外轮廓角点</span>
         </div>
-        {!positions ? (
+        {rendererError ? (
+          <div className="preview-placeholder">{rendererError}</div>
+        ) : !positions ? (
           <div className="preview-placeholder">等待有效参数后生成预览</div>
         ) : null}
       </div>

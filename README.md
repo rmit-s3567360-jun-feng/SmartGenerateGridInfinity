@@ -13,6 +13,10 @@
 
 [`docs/DEVELOPMENT_CONTEXT.md`](./docs/DEVELOPMENT_CONTEXT.md)
 
+本轮 `STL 改底适配 V1` 的实现与 review 入口见：
+
+[`docs/STL_RETROFIT_V1_REVIEW.md`](./docs/STL_RETROFIT_V1_REVIEW.md)
+
 所有未完成、已确认方向的需求统一维护在：
 
 [`docs/OPEN_REQUIREMENTS.md`](./docs/OPEN_REQUIREMENTS.md)

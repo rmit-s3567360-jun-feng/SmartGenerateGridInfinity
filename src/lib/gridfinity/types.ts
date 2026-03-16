@@ -5,11 +5,15 @@ export type TemplateId =
   | 'generic-bin'
   | 'memory-card-tray'
   | 'photo-outline-bin'
+  | 'stl-cavity-bin'
+  | 'stl-retrofit'
 
 export type PrimitiveParamValue = string | number | boolean
 export type JsonValue = unknown
 export type ParameterValues = Record<string, unknown>
 export type ParameterFieldSection = 'basic' | 'advanced'
+export type QuarterTurn = 0 | 1 | 2 | 3
+export type StlFormat = 'ascii' | 'binary'
 
 export interface GridfinitySpec {
   version: string
@@ -141,6 +145,38 @@ export interface PhotoOutlineBinParams extends BaseBinParams {
   analysis: PhotoOutlineAnalysis | null
 }
 
+export interface StlRetrofitParams extends ParameterValues {
+  source: ImportedStlSourceSummary | null
+  sizeMode: 'auto' | 'locked'
+  gridX: number
+  gridY: number
+  heightUnits: number
+  rotationX: QuarterTurn
+  rotationY: QuarterTurn
+  rotationZ: QuarterTurn
+  cutDepth: number
+  footprintMargin: number
+  minAdapterThickness: number
+  magnetHoles: boolean
+  stackingLip: boolean
+}
+
+export interface StlCavityBinParams extends ParameterValues {
+  source: ImportedStlSourceSummary | null
+  sizeMode: 'auto' | 'locked'
+  gridX: number
+  gridY: number
+  heightUnits: number
+  rotationX: QuarterTurn
+  rotationY: QuarterTurn
+  rotationZ: QuarterTurn
+  wallThickness: number
+  floorThickness: number
+  xyClearance: number
+  zClearance: number
+  magnetHoles: boolean
+}
+
 export interface FieldOption {
   label: string
   value: string
@@ -178,6 +214,55 @@ export interface BoundsSummary {
   size: [number, number, number]
 }
 
+export interface ImportedStlSourceSummary {
+  assetId: string
+  name: string
+  format: StlFormat
+  sizeBytes: number
+  triangleCount: number
+  originalBounds: BoundsSummary
+  originalSizeMm: [number, number, number]
+}
+
+export interface ImportedAssetRecord {
+  geometry: Geom3
+  summary: ImportedStlSourceSummary
+}
+
+export interface TemplateBuildContext {
+  getImportedAsset: (assetId: string) => ImportedAssetRecord | null
+}
+
+export interface StlRetrofitPlan {
+  size: {
+    gridX: number
+    gridY: number
+    heightUnits: number
+  }
+  rotatedSizeMm: [number, number, number]
+  preservedBodyHeightMm: number
+  baseHeightMm: number
+  totalHeightMm: number
+  isAutoSized: boolean
+  warnings: string[]
+}
+
+export interface StlCavityBinPlan {
+  size: {
+    gridX: number
+    gridY: number
+    heightUnits: number
+  }
+  rotatedSizeMm: [number, number, number]
+  cavitySizeMm: [number, number, number]
+  cavityBottomZ: number
+  cavityTopZ: number
+  topClearanceMm: number
+  resolvedParams: BaseBinParams
+  isAutoSized: boolean
+  warnings: string[]
+}
+
 export interface TemplateBuildOutput {
   geometry: Geom3
   warnings: string[]
@@ -193,7 +278,11 @@ export interface TemplateDefinition<TParams extends ParameterValues> {
   schema: ZodType<TParams>
   defaultParams: TParams
   fields: Array<ParameterField<TParams>>
-  build: (params: TParams, spec: GridfinitySpec) => TemplateBuildOutput
+  build: (
+    params: TParams,
+    spec: GridfinitySpec,
+    context: TemplateBuildContext,
+  ) => TemplateBuildOutput
 }
 
 export interface TemplateCatalogItem {
@@ -209,6 +298,8 @@ export type AnyTemplateDefinition =
   | TemplateDefinition<GenericBinParams>
   | TemplateDefinition<MemoryCardTrayParams>
   | TemplateDefinition<PhotoOutlineBinParams>
+  | TemplateDefinition<StlCavityBinParams>
+  | TemplateDefinition<StlRetrofitParams>
 
 export interface GenerationRequest {
   templateId: TemplateId
@@ -235,6 +326,12 @@ export interface WorkerExportSuccess {
   stlParts: ArrayBuffer[]
 }
 
+export interface WorkerImportStlSuccess {
+  kind: 'import-stl-success'
+  requestId: number
+  summary: ImportedStlSourceSummary
+}
+
 export interface WorkerErrorResponse {
   kind: 'error'
   requestId: number
@@ -244,10 +341,22 @@ export interface WorkerErrorResponse {
 export type WorkerResponse =
   | WorkerGenerateSuccess
   | WorkerExportSuccess
+  | WorkerImportStlSuccess
   | WorkerErrorResponse
 
-export interface WorkerRequest {
+export interface WorkerGenerateRequest {
   kind: 'generate' | 'export'
   requestId: number
   payload: GenerationRequest
 }
+
+export interface WorkerImportStlRequest {
+  kind: 'import-stl'
+  requestId: number
+  payload: {
+    fileName: string
+    bytes: ArrayBuffer
+  }
+}
+
+export type WorkerRequest = WorkerGenerateRequest | WorkerImportStlRequest

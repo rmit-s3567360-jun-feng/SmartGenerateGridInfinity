@@ -1,17 +1,21 @@
 # Development Context
 
-更新时间：2026-03-11
+更新时间：2026-03-15
 
 补充规格文档：
 
 - `docs/OPEN_REQUIREMENTS.md`
 - `docs/NEXT_PHASE_SPEC.md`
 - `docs/TASK_BREAKDOWN.md`
+- `docs/STL_RETROFIT_V1_REVIEW.md`
+- `docs/STL_CAVITY_WORKFLOWS_SPEC.md`
 
 说明：
 
 - 当前代码基线和交接提醒继续维护在本文件
 - 所有未完成、已确认方向的需求统一维护在 `docs/OPEN_REQUIREMENTS.md`
+- `STL 改底适配 V1` 的实现细节、测试入口和 review 关注点单独落在 `docs/STL_RETROFIT_V1_REVIEW.md`
+- 新的 STL 型腔收纳 / 旧收纳盒迁移需求规格单独维护在 `docs/STL_CAVITY_WORKFLOWS_SPEC.md`
 
 ## 1. 项目定位
 

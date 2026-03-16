@@ -3,7 +3,13 @@ import { serialize } from '@jscad/stl-serializer'
 import { geometryToMeshData, getBoundsFromGeometry } from './mesh'
 import { defaultGridfinitySpec } from './spec'
 import { getTemplateDefinition } from './templates'
-import type { GenerationRequest, ParameterValues, TemplateBuildOutput } from './types'
+import type {
+  GenerationRequest,
+  ImportedAssetRecord,
+  ParameterValues,
+  TemplateBuildContext,
+  TemplateBuildOutput,
+} from './types'
 
 export function createCacheKey(request: GenerationRequest, normalizedParams: unknown) {
   return JSON.stringify({
@@ -13,7 +19,14 @@ export function createCacheKey(request: GenerationRequest, normalizedParams: unk
   })
 }
 
-export function generateModel(request: GenerationRequest) {
+const defaultBuildContext: TemplateBuildContext = {
+  getImportedAsset: () => null,
+}
+
+export function generateModel(
+  request: GenerationRequest,
+  context: TemplateBuildContext = defaultBuildContext,
+) {
   const template = getTemplateDefinition(request.templateId)
   const parsed = template.schema.safeParse(request.params)
 
@@ -24,8 +37,9 @@ export function generateModel(request: GenerationRequest) {
   const buildTemplate = template.build as (
     params: ParameterValues,
     spec: typeof defaultGridfinitySpec,
+    buildContext: TemplateBuildContext,
   ) => TemplateBuildOutput
-  const { geometry, warnings } = buildTemplate(parsed.data, defaultGridfinitySpec)
+  const { geometry, warnings } = buildTemplate(parsed.data, defaultGridfinitySpec, context)
   const cacheKey = createCacheKey(request, parsed.data)
 
   return {
@@ -36,6 +50,14 @@ export function generateModel(request: GenerationRequest) {
       bounds: getBoundsFromGeometry(geometry),
       warnings,
     },
+  }
+}
+
+export function createBuildContext(
+  assets: Map<string, ImportedAssetRecord>,
+): TemplateBuildContext {
+  return {
+    getImportedAsset: (assetId) => assets.get(assetId) ?? null,
   }
 }
 

@@ -22,9 +22,23 @@ vi.mock('../hooks/useModelGenerator', () => ({
     },
     isGenerating: false,
     isExporting: false,
+    isImporting: false,
     runtimeError: null,
     validationErrors: [],
     exportModel: vi.fn(async () => new ArrayBuffer(128)),
+    importStlSource: vi.fn(async () => ({
+      assetId: 'asset-1',
+      name: 'fixture.stl',
+      format: 'binary',
+      sizeBytes: 1024,
+      triangleCount: 12,
+      originalBounds: {
+        min: [0, 0, 0],
+        max: [20, 20, 20],
+        size: [20, 20, 20],
+      },
+      originalSizeMm: [20, 20, 20],
+    })),
   }),
 }))
 
@@ -124,5 +138,41 @@ describe('GeneratorPage', () => {
       'href',
       '/downloads/photo-outline-l-ruler-80x60mm.stl',
     )
+  })
+
+  it('renders the STL retrofit workflow for the dedicated template', () => {
+    render(
+      <MemoryRouter initialEntries={['/generator/stl-retrofit']}>
+        <Routes>
+          <Route element={<GeneratorPage />} path="/generator/:templateId" />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(screen.getAllByText('STL 改底适配').length).toBeGreaterThan(0)
+    expect(screen.getByText('上传 STL 模型')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'X +90°' })).toBeInTheDocument()
+    expect(screen.getByText('切除深度')).toBeInTheDocument()
+    expect(screen.getByText('尺寸模式')).toBeInTheDocument()
+    expect(screen.getByText('标准堆叠口')).toBeInTheDocument()
+    expect(screen.getByText('改底规则')).toBeInTheDocument()
+  })
+
+  it('renders the STL cavity workflow for the dedicated template', () => {
+    render(
+      <MemoryRouter initialEntries={['/generator/stl-cavity-bin']}>
+        <Routes>
+          <Route element={<GeneratorPage />} path="/generator/:templateId" />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(screen.getAllByText('STL 型腔收纳').length).toBeGreaterThan(0)
+    expect(screen.getByText('上传物品 STL')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'X +90°' })).toBeInTheDocument()
+    expect(screen.getByText('XY 清隙')).toBeInTheDocument()
+    expect(screen.getByText('顶部余量')).toBeInTheDocument()
+    expect(screen.getByText('壁厚')).toBeInTheDocument()
+    expect(screen.getByText('型腔规则')).toBeInTheDocument()
   })
 })

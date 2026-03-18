@@ -44,6 +44,7 @@ export function ParameterPanel({
   })
   const basicFields = visibleFields.filter((field) => field.section !== 'advanced')
   const advancedFields = visibleFields.filter((field) => field.section === 'advanced')
+  const advancedFieldCount = advancedFields.length
 
   function renderField(field: ParameterField<ParameterValues>) {
     const value = values[field.key]
@@ -130,6 +131,10 @@ export function ParameterPanel({
         </button>
       </div>
       <p className="panel__body">{template.summary}</p>
+      <p className="panel__meta">
+        基础参数 {basicFields.length} 项
+        {advancedFieldCount > 0 ? ` · 高级参数 ${advancedFieldCount} 项` : ''}
+      </p>
       <p className="panel__hint">数字参数支持拖动滑杆，方便边调边看 3D 预览。</p>
       {validationErrors.length > 0 ? (
         <div className="error-box" role="alert">
@@ -152,6 +157,7 @@ export function ParameterPanel({
             onClick={() => setShowAdvanced((current) => !current)}
           >
             {showAdvanced ? '收起高级设置' : '展开高级设置'}
+            {advancedFieldCount > 0 ? `（${advancedFieldCount}）` : ''}
           </button>
           {showAdvanced ? (
             <div className="form-grid">

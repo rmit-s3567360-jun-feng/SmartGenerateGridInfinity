@@ -466,6 +466,8 @@ export function buildPhotoOutlineBin(
   spec: GridfinitySpec,
   _context: TemplateBuildContext,
 ): TemplateBuildOutput {
+  void _context
+
   const plan = resolvePhotoOutlinePlan(params, spec)
   const solid = createBaseBinSolid(plan.resolvedParams, spec)
   const contourProfile = createContourProfile(plan.cavityPointsMm, params.cavityClearance)

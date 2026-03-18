@@ -284,16 +284,28 @@ function rotatePoint(
 
   for (let index = 0; index < turns; index += 1) {
     if (axis === 'x') {
-      ;[x, y, z] = [x, -z, y]
+      const nextY = -z
+      const nextZ = y
+
+      y = nextY
+      z = nextZ
       continue
     }
 
     if (axis === 'y') {
-      ;[x, y, z] = [z, y, -x]
+      const nextX = z
+      const nextZ = -x
+
+      x = nextX
+      z = nextZ
       continue
     }
 
-    ;[x, y, z] = [-y, x, z]
+    const nextX = -y
+    const nextY = x
+
+    x = nextX
+    y = nextY
   }
 
   return [x, y, z]

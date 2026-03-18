@@ -279,6 +279,8 @@ function buildGenericBin(
   spec: GridfinitySpec,
   _context: TemplateBuildContext,
 ): TemplateBuildOutput {
+  void _context
+
   const solid = createBaseBinSolid(params, spec)
   const metrics = getBinMetrics(params, spec)
   const warnings: string[] = []
@@ -451,6 +453,8 @@ function buildMemoryCardTray(
   spec: GridfinitySpec,
   _context: TemplateBuildContext,
 ): TemplateBuildOutput {
+  void _context
+
   const plan = resolveMemoryCardPlan(params, spec)
   const solid = createBaseBinSolid(plan.resolvedParams, spec)
   const metrics = getBinMetrics(plan.resolvedParams, spec)

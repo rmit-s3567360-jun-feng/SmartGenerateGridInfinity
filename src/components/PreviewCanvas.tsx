@@ -62,9 +62,10 @@ export function PreviewCanvas({
       renderer = new WebGLRenderer({ antialias: true })
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
       container.appendChild(renderer.domElement)
-      setRendererError(null)
     } catch {
-      setRendererError('当前环境不支持 WebGL 预览，参数编辑和 STL 导出仍可继续。')
+      queueMicrotask(() => {
+        setRendererError('当前环境不支持 WebGL 预览，参数编辑和 STL 导出仍可继续。')
+      })
       return
     }
 

@@ -20,9 +20,16 @@ interface PendingRequest {
   reject: (reason?: unknown) => void
 }
 
+interface UseModelGeneratorOptions {
+  autoGenerate?: boolean
+  exportParams?: ParameterValues
+  validationParams?: ParameterValues
+}
+
 export function useModelGenerator(
   templateId: TemplateId,
-  rawParams: ParameterValues,
+  generationParams: ParameterValues,
+  options: UseModelGeneratorOptions = {},
 ) {
   const [generation, setGeneration] = useState<GenerationResult | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
@@ -33,13 +40,19 @@ export function useModelGenerator(
   const requestIdRef = useRef(0)
   const generationSequenceRef = useRef(0)
   const pendingRequestsRef = useRef(new Map<number, PendingRequest>())
-  const debouncedParams = useDebouncedValue(rawParams)
+  const debouncedParams = useDebouncedValue(generationParams)
   const template = getTemplateDefinition(templateId)
-  const validation = template.schema.safeParse(rawParams)
+  const validationSource = options.validationParams ?? generationParams
+  const exportSource = options.exportParams ?? generationParams
+  const shouldAutoGenerate = options.autoGenerate ?? true
+  const effectiveGenerationParams = shouldAutoGenerate
+    ? debouncedParams
+    : generationParams
+  const validation = template.schema.safeParse(validationSource)
   const validationErrors = validation.success
     ? []
     : validation.error.issues.map((issue) => firstSentence(issue.message))
-  const isPreviewPending = rawParams !== debouncedParams
+  const isPreviewPending = shouldAutoGenerate && generationParams !== debouncedParams
 
   useEffect(() => {
     const worker = new Worker(new URL('../workers/model.worker.ts', import.meta.url), {
@@ -102,7 +115,7 @@ export function useModelGenerator(
   }
 
   useEffect(() => {
-    const parsed = template.schema.safeParse(debouncedParams)
+    const parsed = template.schema.safeParse(effectiveGenerationParams)
 
     if (!parsed.success) {
       generationSequenceRef.current += 1
@@ -154,10 +167,10 @@ export function useModelGenerator(
           setIsGenerating(false)
         }
       })
-  }, [debouncedParams, template, templateId])
+  }, [effectiveGenerationParams, template, templateId])
 
   async function exportModel() {
-    const parsed = template.schema.safeParse(rawParams)
+    const parsed = template.schema.safeParse(exportSource)
 
     if (!parsed.success) {
       throw new Error('参数校验未通过，无法导出 STL。')

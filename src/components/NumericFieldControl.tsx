@@ -1,9 +1,15 @@
+import { useState } from 'react'
+
+import { FieldHint } from './FieldHint'
+
 interface NumericFieldControlProps {
   label: string
   description: string
   min: number
   max: number
   step: number
+  unit?: string
+  showHint?: boolean
   value: unknown
   onChange: (value: number | string) => void
 }
@@ -14,65 +20,68 @@ export function NumericFieldControl({
   min,
   max,
   step,
+  unit,
+  showHint = true,
   value,
   onChange,
 }: NumericFieldControlProps) {
-  const sliderValue = clamp(resolveNumericValue(value, min), min, max)
+  const [draftValue, setDraftValue] = useState<string | null>(null)
+  const displayedValue = draftValue ?? String(value)
 
   return (
     <label className="form-field form-field--number">
       <div className="form-field__top">
-        <span>{label}</span>
-        <output className="value-chip">{formatNumericValue(sliderValue, step)}</output>
+        <span title={label}>{label}</span>
+        {unit ? <small className="field-unit">{unit}</small> : null}
+        {showHint ? <FieldHint text={description} /> : null}
       </div>
-      <small>{description}</small>
-      <div className="number-control">
-        <input
-          className="number-control__slider"
-          max={max}
-          min={min}
-          step={step}
-          type="range"
-          value={sliderValue}
-          onChange={(event) => onChange(Number(event.target.value))}
-        />
-        <div className="number-control__meta" aria-hidden="true">
-          <span>{formatNumericValue(min, step)}</span>
-          <span>拖动即可联动预览</span>
-          <span>{formatNumericValue(max, step)}</span>
-        </div>
-        <input
-          max={max}
-          min={min}
-          step={step}
-          type="number"
-          value={String(value)}
-          onChange={(event) => onChange(event.target.value)}
-        />
-      </div>
+      <input
+        aria-label={label}
+        max={max}
+        min={min}
+        step={step}
+        type="number"
+        value={displayedValue}
+        onBlur={() => {
+          const numericValue = parseDraftNumber(displayedValue)
+
+          if (numericValue === null) {
+            setDraftValue(null)
+            return
+          }
+
+          setDraftValue(null)
+        }}
+        onChange={(event) => {
+          const nextValue = event.target.value
+
+          setDraftValue(nextValue)
+
+          const numericValue = parseDraftNumber(nextValue)
+
+          if (numericValue !== null) {
+            onChange(numericValue)
+          }
+        }}
+      />
     </label>
   )
 }
 
-function resolveNumericValue(value: unknown, fallback: number) {
-  const numeric = Number(value)
+function parseDraftNumber(value: string) {
+  const trimmed = value.trim()
 
-  return Number.isFinite(numeric) ? numeric : fallback
-}
+  if (
+    trimmed.length === 0 ||
+    trimmed === '-' ||
+    trimmed === '.' ||
+    trimmed === '-.' ||
+    trimmed.endsWith('.')
+  ) {
+    return null
+  }
 
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value))
-}
+  const numericValue = Number(trimmed)
 
-function formatNumericValue(value: number, step: number) {
-  const precision = getPrecision(step)
-
-  return precision > 0 ? value.toFixed(precision) : String(Math.round(value))
-}
-
-function getPrecision(step: number) {
-  const normalized = String(step)
-  const decimalPart = normalized.split('.')[1]
-
-  return decimalPart?.length ?? 0
+  return Number.isFinite(numericValue) ? numericValue : null
 }

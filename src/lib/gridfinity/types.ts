@@ -3,6 +3,7 @@ import type { ZodType } from 'zod'
 
 export type TemplateId =
   | 'generic-bin'
+  | 'parametric-cavity-bin'
   | 'memory-card-tray'
   | 'photo-outline-bin'
   | 'stl-cavity-bin'
@@ -12,6 +13,7 @@ export type PrimitiveParamValue = string | number | boolean
 export type JsonValue = unknown
 export type ParameterValues = Record<string, unknown>
 export type ParameterFieldSection = 'basic' | 'advanced'
+export type AxisName = 'x' | 'y' | 'z'
 export type QuarterTurn = 0 | 1 | 2 | 3
 export type StlFormat = 'ascii' | 'binary'
 
@@ -40,6 +42,92 @@ export interface BaseBinParams extends ParameterValues {
   labelLip: boolean
 }
 
+export type GenericShapeKind =
+  | 'rectangle'
+  | 'rounded-rectangle'
+  | 'circle'
+  | 'capsule'
+export type ShapeArrangementMode = 'x-first' | 'y-first'
+
+export interface GenericShapeEntry {
+  id: string
+  label: string
+  kind: GenericShapeKind
+  quantity: number
+  width: number
+  depth: number
+  height: number
+  cornerRadius: number
+  diameter: number
+  length: number
+  rotationX: QuarterTurn
+  rotationY: QuarterTurn
+  rotationZ: QuarterTurn
+}
+
+export type GenericShapePose =
+  | 'flat'
+  | 'flat-rotated'
+  | 'vertical-on-width'
+  | 'vertical-on-depth'
+
+export interface GenericShapePoseCandidate {
+  pose: GenericShapePose
+  label: string
+  rotationX: QuarterTurn
+  rotationY: QuarterTurn
+  rotationZ: QuarterTurn
+  footprintX: number
+  footprintY: number
+  cavityHeight: number
+}
+
+export interface PlacedShapeInstance {
+  entryId: string
+  label: string
+  kind: GenericShapeKind
+  pose: GenericShapePose
+  poseLabel: string
+  centerX: number
+  centerY: number
+  footprintX: number
+  footprintY: number
+  cavityHeight: number
+  cavityBottomZ: number
+  rotationX: QuarterTurn
+  rotationY: QuarterTurn
+  rotationZ: QuarterTurn
+}
+
+export interface ShapeCavityPlan {
+  size: {
+    gridX: number
+    gridY: number
+    heightUnits: number
+  }
+  cavityBottomZ: number
+  cavityTopZ: number
+  topClearanceMm: number
+  usableCavityDepthMm: number
+  protrusionHeightMm: number
+  totalCavityCount: number
+  placedInstances: PlacedShapeInstance[]
+  chosenPoses: Array<{
+    entryId: string
+    label: string
+    kind: GenericShapeKind
+    quantity: number
+    pose: GenericShapePose
+    poseLabel: string
+    rotationX: QuarterTurn
+    rotationY: QuarterTurn
+    rotationZ: QuarterTurn
+  }>
+  resolvedParams: BaseBinParams
+  isAutoSized: boolean
+  warnings: string[]
+}
+
 export interface GenericBinParams extends BaseBinParams {
   compartmentsX: number
   compartmentsY: number
@@ -54,6 +142,14 @@ export interface GenericBinParams extends BaseBinParams {
   dividerY1: number
   dividerY2: number
   dividerY3: number
+}
+
+export interface ParametricCavityBinParams extends BaseBinParams {
+  arrangementMode: ShapeArrangementMode
+  xyClearance: number
+  zClearance: number
+  interItemGap: number
+  shapeEntries: GenericShapeEntry[]
 }
 
 export type MemoryCardMode =
@@ -180,24 +276,53 @@ export interface StlCavityBinParams extends ParameterValues {
 export interface FieldOption {
   label: string
   value: string
+  description?: string
 }
+
+export type ParameterPanelSectionId =
+  | 'general'
+  | 'size'
+  | 'layout'
+  | 'features'
+  | 'advanced'
+
+export type ParameterFieldPresentation =
+  | 'default'
+  | 'cards'
+  | 'segmented'
+  | 'switch'
+
+export type ParameterFieldLayout = 'full' | 'half'
 
 export interface FieldVisibilityRule<TParams extends ParameterValues = ParameterValues> {
   key: keyof TParams & string
   values: PrimitiveParamValue[]
 }
 
+export interface ParameterFieldGroup {
+  id: string
+  label: string
+  description?: string
+  presentation?: 'axis'
+}
+
 export interface ParameterField<TParams extends ParameterValues = ParameterValues> {
   key: keyof TParams & string
   label: string
   description: string
+  unit?: string
   kind: 'number' | 'boolean' | 'select'
   section?: ParameterFieldSection
+  panelSection?: ParameterPanelSectionId
+  presentation?: ParameterFieldPresentation
+  layout?: ParameterFieldLayout
   min?: number
   max?: number
   step?: number
   options?: FieldOption[]
   visibleWhen?: Array<FieldVisibilityRule<TParams>>
+  axis?: AxisName
+  group?: ParameterFieldGroup
 }
 
 export interface GeometryHandle {
@@ -296,6 +421,7 @@ export interface TemplateCatalogItem {
 
 export type AnyTemplateDefinition =
   | TemplateDefinition<GenericBinParams>
+  | TemplateDefinition<ParametricCavityBinParams>
   | TemplateDefinition<MemoryCardTrayParams>
   | TemplateDefinition<PhotoOutlineBinParams>
   | TemplateDefinition<StlCavityBinParams>

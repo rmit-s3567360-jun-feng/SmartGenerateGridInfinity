@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import {
   AmbientLight,
@@ -24,6 +25,8 @@ interface PreviewCanvasProps {
   bounds: BoundsSummary | null
   isLoading: boolean
   isPending?: boolean
+  pendingLabel?: string
+  actionSlot?: ReactNode
   positions: Float32Array | null
 }
 
@@ -31,6 +34,8 @@ export function PreviewCanvas({
   bounds,
   isLoading,
   isPending = false,
+  pendingLabel = '等待更新...',
+  actionSlot,
   positions,
 }: PreviewCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -172,7 +177,7 @@ export function PreviewCanvas({
       if (!nextBounds) {
         modelGroup.position.set(0, 0, 0)
         axes.position.set(0, 0, 0)
-        axes.scale.setScalar(24)
+        axes.scale.setScalar(32)
         controls.target.set(0, 0, 20)
         camera.position.set(150, -160, 110)
         camera.near = 0.1
@@ -197,7 +202,7 @@ export function PreviewCanvas({
       const size = box.getSize(new Vector3())
       const maxDim = Math.max(size.x, size.y, size.z, 18)
       const distance = maxDim * 2
-      const axisLength = Math.max(maxDim * 0.75, 24)
+      const axisLength = Math.max(maxDim * 0.95, 34)
 
       axes.position.set(0, 0, 0)
       axes.scale.setScalar(axisLength)
@@ -227,7 +232,7 @@ export function PreviewCanvas({
     fitCameraToBounds(bounds)
   }, [bounds, positions])
 
-  const statusLabel = isLoading ? '生成中...' : isPending ? '等待更新...' : null
+  const statusLabel = isLoading ? '生成中...' : isPending ? pendingLabel : null
 
   return (
     <section className="preview-shell">
@@ -237,6 +242,7 @@ export function PreviewCanvas({
           <h2>实时网格</h2>
         </div>
         <div className="preview-shell__actions">
+          {actionSlot}
           {statusLabel ? (
             <span
               className={isPending && !isLoading ? 'status-pill status-pill--pending' : 'status-pill'}

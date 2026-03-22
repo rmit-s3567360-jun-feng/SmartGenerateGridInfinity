@@ -13,6 +13,10 @@ import {
   buildPhotoOutlineBin,
   photoOutlineDefaultParams,
 } from './photoOutline'
+import {
+  buildGenericShapeCavityBin,
+  createDefaultGenericShapeEntry,
+} from './genericShapeCavity'
 import { defaultGridfinitySpec, getBinMetrics } from './spec'
 import {
   buildStlCavityBin,
@@ -23,12 +27,15 @@ import {
   stlRetrofitDefaultParams,
 } from './stlRetrofit'
 import type {
+  AxisName,
   AnyTemplateDefinition,
   GenericBinParams,
   GridfinitySpec,
   MemoryCardTrayParams,
   ParameterValues,
   ParameterField,
+  ParameterFieldGroup,
+  ParametricCavityBinParams,
   TemplateId,
   TemplateBuildOutput,
   TemplateBuildContext,
@@ -79,7 +86,80 @@ const booleanField = <T extends ParameterValues>(
   ...extra,
 })
 
+const axisGroup = (
+  id: string,
+  label: string,
+  description: string,
+): ParameterFieldGroup => ({
+  id,
+  label,
+  description,
+  presentation: 'axis',
+})
+
+const axisNumberField = <T extends ParameterValues>(
+  key: keyof T & string,
+  axis: AxisName,
+  description: string,
+  min: number,
+  max: number,
+  step: number,
+  group: ParameterFieldGroup,
+  extra: Partial<ParameterField<T>> = {},
+) =>
+  numberField<T>(key, axis.toUpperCase(), description, min, max, step, {
+    ...extra,
+    axis,
+    group,
+  })
+
+const quarterTurnSchema = z.union([
+  z.literal(0),
+  z.literal(1),
+  z.literal(2),
+  z.literal(3),
+])
+
+const genericShapeEntrySchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  kind: z.enum(['rectangle', 'rounded-rectangle', 'circle', 'capsule']),
+  quantity: z.coerce.number().int().min(1).max(128),
+  width: z.coerce.number().min(1).max(200),
+  depth: z.coerce.number().min(1).max(200),
+  height: z.coerce.number().min(1).max(200),
+  cornerRadius: z.coerce.number().min(0).max(100),
+  diameter: z.coerce.number().min(1).max(200),
+  length: z.coerce.number().min(1).max(200),
+  rotationX: quarterTurnSchema,
+  rotationY: quarterTurnSchema,
+  rotationZ: quarterTurnSchema,
+}).superRefine((entry, context) => {
+  if (entry.kind === 'rounded-rectangle') {
+    const maxRadius = Math.min(entry.width, entry.depth) / 2
+
+    if (entry.cornerRadius > maxRadius + 0.001) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: '圆角矩形的圆角半径不能超过短边的一半。',
+        path: ['cornerRadius'],
+      })
+    }
+  }
+
+  if (entry.kind === 'capsule' && entry.diameter > entry.length + 0.001) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: '胶囊槽直径不能大于总长。',
+      path: ['diameter'],
+    })
+  }
+})
+
 const genericBinSchema = baseSchema.extend({
+  gridX: z.coerce.number().int().min(1).max(8),
+  gridY: z.coerce.number().int().min(1).max(8),
+  heightUnits: z.coerce.number().int().min(2).max(24),
   compartmentsX: z.coerce.number().int().min(1).max(4),
   compartmentsY: z.coerce.number().int().min(1).max(4),
   innerWallThicknessX: z.coerce.number().min(2).max(84),
@@ -108,6 +188,25 @@ const genericBinSchema = baseSchema.extend({
     'Y',
     context,
   )
+})
+
+const parametricCavityBinSchema = baseSchema.extend({
+  gridX: z.coerce.number().int().min(1).max(8),
+  gridY: z.coerce.number().int().min(1).max(8),
+  heightUnits: z.coerce.number().int().min(2).max(24),
+  arrangementMode: z.enum(['x-first', 'y-first']),
+  xyClearance: z.coerce.number().min(0).max(4),
+  zClearance: z.coerce.number().min(0).max(12),
+  interItemGap: z.coerce.number().min(0).max(12),
+  shapeEntries: z.array(genericShapeEntrySchema),
+}).superRefine((value, context) => {
+  if (value.shapeEntries.length === 0) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: '请至少添加一种形状。',
+      path: ['shapeEntries'],
+    })
+  }
 })
 
 const memoryCardTraySchema = baseSchema.extend({
@@ -204,13 +303,6 @@ const photoOutlineBinSchema = baseSchema.extend({
     })
   }
 })
-
-const quarterTurnSchema = z.union([
-  z.literal(0),
-  z.literal(1),
-  z.literal(2),
-  z.literal(3),
-])
 
 const importedStlSourceSummarySchema = z.object({
   assetId: z.string().min(1),
@@ -499,15 +591,33 @@ function buildMemoryCardTray(
   }
 }
 
+const genericOuterSizeGroup = axisGroup(
+  'generic-outer-size',
+  '外部尺寸',
+  'Gridfinity 占位沿 X / Y / Z 轴表达，和右侧预览坐标轴保持一致。',
+)
+
+const genericInteriorMassGroup = axisGroup(
+  'generic-interior-mass',
+  '内部实体厚度',
+  '传统隔板模式下，用 X / Y / Z 分别控制左右、前后和底部的实体厚度。',
+)
+
+const memoryCardOuterSizeGroup = axisGroup(
+  'memory-card-outer-size',
+  '外部尺寸',
+  '固定模式下直接指定 X / Y / Z 占位单元，和预览坐标轴一致。',
+)
+
 export const templateDefinitions: Record<TemplateId, AnyTemplateDefinition> = {
   'generic-bin': {
     id: 'generic-bin',
     name: '通用收纳盒',
     tagline: '最稳的 Gridfinity 起点',
-    summary: '标准开口 bin，支持分仓、隔板尺寸、磁铁孔、XYZ 内壁厚度和标签 lip。',
+    summary: '标准开口 bin，聚焦传统隔板分仓和内部实体布局。',
     description:
-      '适合装零件、螺丝、电子小件，按 Gridfinity 常见尺寸生成可直接打印的收纳盒。',
-    previewFacts: ['开口 bin', '支持隔板距离/厚度/高度', 'XYZ 内壁厚度可调'],
+      '适合装零件、螺丝、电子小件，提供隔板分仓、磁铁孔和标签沿等常用基础能力。',
+    previewFacts: ['开口 bin', '隔板分仓', '标签沿 / 磁铁孔'],
     schema: genericBinSchema,
     defaultParams: {
       gridX: 2,
@@ -532,38 +642,175 @@ export const templateDefinitions: Record<TemplateId, AnyTemplateDefinition> = {
       dividerY3: getDefaultGenericDividerOffsets(79.5, 2, 1)[2],
     },
     fields: [
-      numberField<GenericBinParams>('gridX', '宽度单元', 'Gridfinity X 方向单元数', 1, 4, 1),
-      numberField<GenericBinParams>('gridY', '深度单元', 'Gridfinity Y 方向单元数', 1, 4, 1),
-      numberField<GenericBinParams>('heightUnits', '高度单元', '每单位为 7mm', 2, 12, 1),
-      numberField<GenericBinParams>('innerWallThicknessX', 'X 内壁厚度', '控制左右两侧内壁厚度；加大后会压缩内部宽度', 2, 84, 0.5),
-      numberField<GenericBinParams>('innerWallThicknessY', 'Y 内壁厚度', '控制前后两侧内壁厚度；加大后会压缩内部深度', 2, 84, 0.5),
-      numberField<GenericBinParams>('innerWallThicknessZ', 'Z 内壁厚度', '控制底部向上的实体厚度；加大到极限会接近实心封闭盒', 2, 84, 0.5),
-      numberField<GenericBinParams>('compartmentsX', '横向隔仓', 'X 方向分仓数量', 1, 4, 1),
-      numberField<GenericBinParams>('compartmentsY', '纵向隔仓', 'Y 方向分仓数量', 1, 4, 1),
-      numberField<GenericBinParams>('dividerThickness', '隔板厚度', '统一控制所有隔板厚度', 1.2, 12, 0.2),
-      numberField<GenericBinParams>('dividerHeight', '隔板高度', '从 Z 内壁厚度之上开始计算的隔板高度', 2, 84, 0.5),
-      numberField<GenericBinParams>('dividerX1', '横向隔板 1 距离', '从左侧最外缘内壁量到第 1 条横向隔板起始边的距离（mm）', 2, 120, 0.5, {
+      axisNumberField<GenericBinParams>('gridX', 'x', 'X 方向单元数', 1, 8, 1, genericOuterSizeGroup, {
+        panelSection: 'size',
+        unit: '格',
+      }),
+      axisNumberField<GenericBinParams>('gridY', 'y', 'Y 方向单元数', 1, 8, 1, genericOuterSizeGroup, {
+        panelSection: 'size',
+        unit: '格',
+      }),
+      axisNumberField<GenericBinParams>('heightUnits', 'z', 'Z 方向高度单位（每单位 7mm）', 2, 24, 1, genericOuterSizeGroup, {
+        panelSection: 'size',
+        unit: 'U',
+      }),
+      axisNumberField<GenericBinParams>('innerWallThicknessX', 'x', '左右内壁厚度', 2, 84, 0.5, genericInteriorMassGroup, {
+        panelSection: 'layout',
+        unit: 'mm',
+      }),
+      axisNumberField<GenericBinParams>('innerWallThicknessY', 'y', '前后内壁厚度', 2, 84, 0.5, genericInteriorMassGroup, {
+        panelSection: 'layout',
+        unit: 'mm',
+      }),
+      axisNumberField<GenericBinParams>('innerWallThicknessZ', 'z', '底部实体厚度', 2, 84, 0.5, genericInteriorMassGroup, {
+        panelSection: 'layout',
+        unit: 'mm',
+      }),
+      numberField<GenericBinParams>('compartmentsX', '隔仓 X', 'X 方向分仓数量', 1, 4, 1, {
+        layout: 'half',
+        panelSection: 'layout',
+      }),
+      numberField<GenericBinParams>('compartmentsY', '隔仓 Y', 'Y 方向分仓数量', 1, 4, 1, {
+        layout: 'half',
+        panelSection: 'layout',
+      }),
+      numberField<GenericBinParams>('dividerThickness', '隔板厚', '统一控制所有隔板厚度', 1.2, 12, 0.2, {
+        layout: 'half',
+        panelSection: 'layout',
+        unit: 'mm',
+      }),
+      numberField<GenericBinParams>('dividerHeight', '隔板高', '从 Z 内壁厚度之上开始计算的隔板高度', 2, 84, 0.5, {
+        layout: 'half',
+        panelSection: 'layout',
+        unit: 'mm',
+      }),
+      numberField<GenericBinParams>('dividerX1', '隔板 X1', '从左侧内壁量到第 1 条 X 向隔板起始边的距离（mm）', 2, 120, 0.5, {
+        layout: 'half',
+        panelSection: 'layout',
+        unit: 'mm',
         visibleWhen: [{ key: 'compartmentsX', values: [2, 3, 4] }],
       }),
-      numberField<GenericBinParams>('dividerX2', '横向隔板 2 距离', '从左侧最外缘内壁量到第 2 条横向隔板起始边的距离（mm）', 2, 120, 0.5, {
+      numberField<GenericBinParams>('dividerX2', '隔板 X2', '从左侧内壁量到第 2 条 X 向隔板起始边的距离（mm）', 2, 120, 0.5, {
+        layout: 'half',
+        panelSection: 'layout',
+        unit: 'mm',
         visibleWhen: [{ key: 'compartmentsX', values: [3, 4] }],
       }),
-      numberField<GenericBinParams>('dividerX3', '横向隔板 3 距离', '从左侧最外缘内壁量到第 3 条横向隔板起始边的距离（mm）', 2, 120, 0.5, {
+      numberField<GenericBinParams>('dividerX3', '隔板 X3', '从左侧内壁量到第 3 条 X 向隔板起始边的距离（mm）', 2, 120, 0.5, {
+        layout: 'half',
+        panelSection: 'layout',
+        unit: 'mm',
         visibleWhen: [{ key: 'compartmentsX', values: [4] }],
       }),
-      numberField<GenericBinParams>('dividerY1', '纵向隔板 1 距离', '从前侧最外缘内壁量到第 1 条纵向隔板起始边的距离（mm）', 2, 120, 0.5, {
+      numberField<GenericBinParams>('dividerY1', '隔板 Y1', '从前侧内壁量到第 1 条 Y 向隔板起始边的距离（mm）', 2, 120, 0.5, {
+        layout: 'half',
+        panelSection: 'layout',
+        unit: 'mm',
         visibleWhen: [{ key: 'compartmentsY', values: [2, 3, 4] }],
       }),
-      numberField<GenericBinParams>('dividerY2', '纵向隔板 2 距离', '从前侧最外缘内壁量到第 2 条纵向隔板起始边的距离（mm）', 2, 120, 0.5, {
+      numberField<GenericBinParams>('dividerY2', '隔板 Y2', '从前侧内壁量到第 2 条 Y 向隔板起始边的距离（mm）', 2, 120, 0.5, {
+        layout: 'half',
+        panelSection: 'layout',
+        unit: 'mm',
         visibleWhen: [{ key: 'compartmentsY', values: [3, 4] }],
       }),
-      numberField<GenericBinParams>('dividerY3', '纵向隔板 3 距离', '从前侧最外缘内壁量到第 3 条纵向隔板起始边的距离（mm）', 2, 120, 0.5, {
+      numberField<GenericBinParams>('dividerY3', '隔板 Y3', '从前侧内壁量到第 3 条 Y 向隔板起始边的距离（mm）', 2, 120, 0.5, {
+        layout: 'half',
+        panelSection: 'layout',
+        unit: 'mm',
         visibleWhen: [{ key: 'compartmentsY', values: [4] }],
       }),
-      booleanField<GenericBinParams>('magnetHoles', '磁铁孔', '底部增加 6x2mm 磁铁孔'),
-      booleanField<GenericBinParams>('labelLip', '标签 lip', '前侧增加标签唇边'),
+      booleanField<GenericBinParams>('magnetHoles', '磁铁孔', '底部增加 6x2mm 磁铁孔', {
+        panelSection: 'features',
+        presentation: 'switch',
+      }),
+      booleanField<GenericBinParams>('labelLip', '标签沿', '前侧增加标签唇边', {
+        panelSection: 'features',
+        presentation: 'switch',
+      }),
     ],
     build: buildGenericBin,
+  },
+  'parametric-cavity-bin': {
+    id: 'parametric-cavity-bin',
+    name: '参数化型腔盒',
+    tagline: '输入形状后自动排布并生成独立型腔',
+    summary: '手动输入盒体尺寸后，按形状尺寸与姿态自动沿 X / Y / Z 规则规划型腔。',
+    description:
+      '支持矩形、圆角矩形、圆和胶囊槽；盒体尺寸始终手动指定，系统会在当前盒体内自动排布并校验是否能装下。',
+    previewFacts: ['手动盒体尺寸', '多形状自动排布', '独立开口型腔'],
+    schema: parametricCavityBinSchema,
+    defaultParams: {
+      gridX: 2,
+      gridY: 2,
+      heightUnits: 4,
+      wallThickness: 2,
+      floorThickness: 2,
+      magnetHoles: true,
+      labelLip: false,
+      arrangementMode: 'x-first',
+      xyClearance: 0.6,
+      zClearance: 1.2,
+      interItemGap: 1.6,
+      shapeEntries: [createDefaultGenericShapeEntry()],
+    },
+    fields: [
+      {
+        key: 'arrangementMode',
+        label: '排列方式',
+        description: '决定同一批形状在盒体里先沿 X 还是先沿 Y 方向排布。',
+        kind: 'select',
+        layout: 'full',
+        panelSection: 'general',
+        presentation: 'segmented',
+        options: [
+          { label: '横向优先', value: 'x-first' },
+          { label: '纵向优先', value: 'y-first' },
+        ],
+      },
+      axisNumberField<ParametricCavityBinParams>('gridX', 'x', 'X 方向单元数', 1, 8, 1, genericOuterSizeGroup, {
+        panelSection: 'size',
+        unit: '格',
+      }),
+      axisNumberField<ParametricCavityBinParams>('gridY', 'y', 'Y 方向单元数', 1, 8, 1, genericOuterSizeGroup, {
+        panelSection: 'size',
+        unit: '格',
+      }),
+      axisNumberField<ParametricCavityBinParams>('heightUnits', 'z', 'Z 方向高度单位（每单位 7mm）', 2, 24, 1, genericOuterSizeGroup, {
+        panelSection: 'size',
+        unit: 'U',
+      }),
+      numberField<ParametricCavityBinParams>('wallThickness', '壁厚', '标准侧壁厚度。', 1.2, 3.6, 0.1, {
+        layout: 'half',
+        panelSection: 'layout',
+        unit: 'mm',
+      }),
+      numberField<ParametricCavityBinParams>('floorThickness', '底厚', '底脚之上的内部底板厚度；从模型最底面量会再叠加底脚高度。', 1.2, 5, 0.1, {
+        layout: 'half',
+        panelSection: 'layout',
+        unit: 'mm',
+      }),
+      numberField<ParametricCavityBinParams>('xyClearance', 'XY 清隙', '型腔在 X/Y 方向预留的装配清隙。', 0, 4, 0.1, {
+        layout: 'half',
+        panelSection: 'layout',
+        unit: 'mm',
+      }),
+      numberField<ParametricCavityBinParams>('zClearance', '顶余量', '优先保留的顶部余量；空间不足时允许顶部露出。', 0, 12, 0.1, {
+        layout: 'half',
+        panelSection: 'layout',
+        unit: 'mm',
+      }),
+      numberField<ParametricCavityBinParams>('interItemGap', '形状间距', '相邻型腔之间保留的最小实体间距。', 0, 12, 0.1, {
+        layout: 'half',
+        panelSection: 'layout',
+        unit: 'mm',
+      }),
+      booleanField<ParametricCavityBinParams>('magnetHoles', '磁铁孔', '底部增加 6x2mm 磁铁孔。', {
+        panelSection: 'features',
+        presentation: 'switch',
+      }),
+    ],
+    build: buildGenericShapeCavityBin,
   },
   'memory-card-tray': {
     id: 'memory-card-tray',
@@ -572,7 +819,7 @@ export const templateDefinitions: Record<TemplateId, AnyTemplateDefinition> = {
     summary: '根据数量和模式自动推荐更紧凑的 SD / microSD 收纳布局。',
     description:
       '支持 microSD 极限收纳、SD 紧凑收纳和混合分区模式，默认优先压缩外部体积。',
-    previewFacts: ['自动推荐尺寸', 'SD / microSD / 混合', '高级参数可折叠'],
+    previewFacts: ['自动推荐尺寸', 'SD / microSD / 混合', '支持扩展参数调节'],
     schema: memoryCardTraySchema,
     defaultParams: {
       gridX: getMemoryCardModeDefaults('micro-sd-compact').gridX,
@@ -598,40 +845,92 @@ export const templateDefinitions: Record<TemplateId, AnyTemplateDefinition> = {
         label: '收纳模式',
         description: '选择 microSD、SD 或混合分区模式',
         kind: 'select',
+        panelSection: 'general',
+        presentation: 'cards',
         options: [
-          { label: 'microSD 极限收纳', value: 'micro-sd-compact' },
-          { label: 'SD 紧凑收纳', value: 'sd-compact' },
-          { label: '混合收纳', value: 'mixed' },
+          {
+            description: '优先压缩 microSD 外部体积',
+            label: 'microSD 极限收纳',
+            value: 'micro-sd-compact',
+          },
+          {
+            description: '为 SD 卡给出更紧凑布局',
+            label: 'SD 紧凑收纳',
+            value: 'sd-compact',
+          },
+          {
+            description: '同时容纳 SD 与 microSD',
+            label: '混合收纳',
+            value: 'mixed',
+          },
         ],
       },
       numberField<MemoryCardTrayParams>('quantity', '数量', '单一卡型时要收纳的卡片数量', 1, 48, 1, {
+        layout: 'half',
+        panelSection: 'general',
         visibleWhen: [{ key: 'mode', values: ['micro-sd-compact', 'sd-compact'] }],
       }),
-      numberField<MemoryCardTrayParams>('sdCount', 'SD 数量', '混合模式下的 SD 数量', 0, 24, 1, {
+      numberField<MemoryCardTrayParams>('sdCount', 'SD 数', '混合模式下的 SD 数量', 0, 24, 1, {
+        layout: 'half',
+        panelSection: 'general',
         visibleWhen: [{ key: 'mode', values: ['mixed'] }],
       }),
-      numberField<MemoryCardTrayParams>('microSdCount', 'microSD 数量', '混合模式下的 microSD 数量', 0, 48, 1, {
+      numberField<MemoryCardTrayParams>('microSdCount', 'microSD 数', '混合模式下的 microSD 数量', 0, 48, 1, {
+        layout: 'half',
+        panelSection: 'general',
         visibleWhen: [{ key: 'mode', values: ['mixed'] }],
       }),
-      booleanField<MemoryCardTrayParams>('enableGripCutout', '抓取缺口', '为每一排提供共享抓取通道'),
-      booleanField<MemoryCardTrayParams>('enableLabelArea', '标签区', '前侧预留标签区域'),
-      booleanField<MemoryCardTrayParams>('lockOuterSize', '固定外部尺寸', '打开后使用你手动指定的外部单元；直接修改下面尺寸也会自动开启'),
-      numberField<MemoryCardTrayParams>('gridX', '宽度单元', '模型占用的 Gridfinity X 单元数；手动修改会自动锁定外部尺寸', 1, 4, 1),
-      numberField<MemoryCardTrayParams>('gridY', '深度单元', '模型占用的 Gridfinity Y 单元数；手动修改会自动锁定外部尺寸', 1, 4, 1),
-      numberField<MemoryCardTrayParams>('heightUnits', '高度单元', '模型高度单位；手动修改会自动锁定外部尺寸', 2, 6, 1),
+      booleanField<MemoryCardTrayParams>('enableGripCutout', '抓取槽', '为每一排提供共享抓取通道', {
+        panelSection: 'features',
+        presentation: 'switch',
+      }),
+      booleanField<MemoryCardTrayParams>('enableLabelArea', '标签区', '前侧预留标签区域', {
+        panelSection: 'features',
+        presentation: 'switch',
+      }),
+      booleanField<MemoryCardTrayParams>('lockOuterSize', '锁定尺寸', '打开后使用你手动指定的外部单元；直接修改下面尺寸也会自动开启', {
+        panelSection: 'size',
+        presentation: 'switch',
+      }),
+      axisNumberField<MemoryCardTrayParams>('gridX', 'x', 'X 方向占位；手动修改会自动锁定外部尺寸', 1, 4, 1, memoryCardOuterSizeGroup, {
+        panelSection: 'size',
+        unit: '格',
+      }),
+      axisNumberField<MemoryCardTrayParams>('gridY', 'y', 'Y 方向占位；手动修改会自动锁定外部尺寸', 1, 4, 1, memoryCardOuterSizeGroup, {
+        panelSection: 'size',
+        unit: '格',
+      }),
+      axisNumberField<MemoryCardTrayParams>('heightUnits', 'z', 'Z 方向高度单位；手动修改会自动锁定外部尺寸', 2, 6, 1, memoryCardOuterSizeGroup, {
+        panelSection: 'size',
+        unit: 'U',
+      }),
       numberField<MemoryCardTrayParams>('wallThickness', '壁厚', '高级：建议 >= 1.6mm', 1.2, 3.6, 0.2, {
+        layout: 'half',
+        panelSection: 'advanced',
         section: 'advanced',
+        unit: 'mm',
       }),
-      numberField<MemoryCardTrayParams>('floorThickness', '底厚', '高级：打印友好的底部厚度', 1.2, 5, 0.2, {
+      numberField<MemoryCardTrayParams>('floorThickness', '底厚', '高级：底脚之上的底板厚度；从模型最底面量会再叠加底脚高度', 1.2, 5, 0.2, {
+        layout: 'half',
+        panelSection: 'advanced',
         section: 'advanced',
+        unit: 'mm',
       }),
       numberField<MemoryCardTrayParams>('slotTolerance', '卡槽公差', '高级：卡片四周预留的公差', 0.25, 1, 0.05, {
+        layout: 'half',
+        panelSection: 'advanced',
         section: 'advanced',
+        unit: 'mm',
       }),
       numberField<MemoryCardTrayParams>('minGripMargin', '最小间距', '高级：卡槽和抓取通道的最小间距', 1, 4, 0.1, {
+        layout: 'half',
+        panelSection: 'advanced',
         section: 'advanced',
+        unit: 'mm',
       }),
       booleanField<MemoryCardTrayParams>('magnetHoles', '磁铁孔', '高级：底部增加 6x2mm 磁铁孔', {
+        panelSection: 'advanced',
+        presentation: 'switch',
         section: 'advanced',
       }),
     ],

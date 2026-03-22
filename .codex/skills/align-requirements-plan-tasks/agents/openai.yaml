@@ -1,0 +1,4 @@
+interface:
+  display_name: "Align Requirements and Plan Tasks"
+  short_description: "Clarify requirements and produce dev tasks"
+  default_prompt: "Use $align-requirements-plan-tasks to turn this requirement into a concrete spec and implementation task list."

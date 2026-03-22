@@ -2,25 +2,29 @@ import { useEffect, useState } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 
 import { ParameterPanel } from '../components/ParameterPanel'
+import { ModelSummaryPanel } from '../components/ModelSummaryPanel'
+import { ParametricCavityWorkflow } from '../components/ParametricCavityWorkflow'
 import { PhotoOutlineWorkflow } from '../components/PhotoOutlineWorkflow'
 import { PreviewCanvas } from '../components/PreviewCanvas'
 import { StlCavityWorkflow } from '../components/StlCavityWorkflow'
 import { StlRetrofitWorkflow } from '../components/StlRetrofitWorkflow'
 import { useModelGenerator } from '../hooks/useModelGenerator'
 import {
-  getMemoryCardRecommendationSummary,
+  resolveMemoryCardPlan,
   normalizeMemoryCardModeParams,
 } from '../lib/gridfinity/memoryCard'
 import {
-  PHOTO_OUTLINE_A4_SHEET_DOWNLOAD_PATH,
-  getPhotoOutlineRecommendationSummary,
-  PHOTO_OUTLINE_RULER_DOWNLOAD_PATH,
+  resolvePhotoOutlinePlan,
 } from '../lib/gridfinity/photoOutline'
+import {
+  resolveGenericShapeCavityPlan,
+} from '../lib/gridfinity/genericShapeCavity'
 import { resolveStlCavityBinPlan } from '../lib/gridfinity/stlCavityBin'
 import { resolveStlRetrofitPlan } from '../lib/gridfinity/stlRetrofit'
 import { templateCatalog } from '../lib/gridfinity/templateCatalog'
 import {
   defaultGridfinitySpec,
+  getBinMetrics,
   gridUnitsToMillimeters,
   heightUnitsToMillimeters,
 } from '../lib/gridfinity/spec'
@@ -32,6 +36,7 @@ import type {
   GenericBinParams,
   MemoryCardMode,
   MemoryCardTrayParams,
+  ParametricCavityBinParams,
   ParameterValues,
   PhotoOutlineBinParams,
   StlCavityBinParams,
@@ -59,6 +64,7 @@ function getGenericInnerSpan(
 function isTemplateId(value: string | undefined): value is TemplateId {
   return (
     value === 'generic-bin' ||
+    value === 'parametric-cavity-bin' ||
     value === 'memory-card-tray' ||
     value === 'photo-outline-bin' ||
     value === 'stl-cavity-bin' ||
@@ -78,12 +84,20 @@ export function GeneratorPage() {
   const template = getTemplateDefinition(templateId)
 
   const [rawParams, setRawParams] = useState<ParameterValues>(template.defaultParams)
+  const [appliedParams, setAppliedParams] = useState<ParameterValues>(template.defaultParams)
   const photoParams =
     templateId === 'photo-outline-bin' ? (rawParams as PhotoOutlineBinParams) : null
   const stlCavityParams =
     templateId === 'stl-cavity-bin' ? (rawParams as StlCavityBinParams) : null
   const stlParams =
     templateId === 'stl-retrofit' ? (rawParams as StlRetrofitParams) : null
+  const parametricCavityParams =
+    templateId === 'parametric-cavity-bin'
+      ? (rawParams as ParametricCavityBinParams)
+      : null
+  const isManualShapeGeneration =
+    templateId === 'parametric-cavity-bin'
+  const generationParams = isManualShapeGeneration ? appliedParams : rawParams
   const {
     exportModel,
     importStlSource,
@@ -94,17 +108,29 @@ export function GeneratorPage() {
     isPreviewPending,
     runtimeError,
     validationErrors,
-  } = useModelGenerator(templateId, rawParams)
+  } = useModelGenerator(templateId, generationParams, {
+    autoGenerate: !isManualShapeGeneration,
+    exportParams: generationParams,
+    validationParams: rawParams,
+  })
+  const hasUnappliedChanges = isManualShapeGeneration && rawParams !== appliedParams
 
   useEffect(() => {
     setRawParams(template.defaultParams)
+    setAppliedParams(template.defaultParams)
   }, [template])
+
+  useEffect(() => {
+    if (!isManualShapeGeneration && appliedParams !== rawParams) {
+      setAppliedParams(rawParams)
+    }
+  }, [appliedParams, isManualShapeGeneration, rawParams])
 
   if (!isTemplateId(routeTemplateId)) {
     return <Navigate replace to="/generator/generic-bin" />
   }
 
-  const memoryCardSummary =
+  const memoryCardPlan =
     templateId === 'memory-card-tray'
       ? (() => {
           try {
@@ -115,13 +141,13 @@ export function GeneratorPage() {
               return null
             }
 
-            return getMemoryCardRecommendationSummary(parsed.data, defaultGridfinitySpec)
+            return resolveMemoryCardPlan(parsed.data, defaultGridfinitySpec)
           } catch {
             return null
           }
         })()
       : null
-  const photoOutlineSummary =
+  const photoOutlinePlan =
     templateId === 'photo-outline-bin'
       ? (() => {
           try {
@@ -132,12 +158,30 @@ export function GeneratorPage() {
               return null
             }
 
-            return getPhotoOutlineRecommendationSummary(parsed.data, defaultGridfinitySpec)
+            return resolvePhotoOutlinePlan(parsed.data, defaultGridfinitySpec)
           } catch {
             return null
           }
         })()
       : null
+  const genericShapePlan =
+    templateId === 'parametric-cavity-bin' && parametricCavityParams
+      ? (() => {
+          try {
+            const genericTemplate = template as TemplateDefinition<ParametricCavityBinParams>
+            const parsed = genericTemplate.schema.safeParse(generationParams)
+
+            if (!parsed.success) {
+              return null
+            }
+
+            return resolveGenericShapeCavityPlan(parsed.data, defaultGridfinitySpec)
+          } catch {
+            return null
+          }
+        })()
+      : null
+
   const stlRetrofitPlan =
     templateId === 'stl-retrofit'
       ? (() => {
@@ -173,23 +217,143 @@ export function GeneratorPage() {
         })()
       : null
   const currentGridX =
-    memoryCardSummary?.size.gridX ??
-    photoOutlineSummary?.size.gridX ??
+    genericShapePlan?.size.gridX ??
+    memoryCardPlan?.size.gridX ??
+    photoOutlinePlan?.size.gridX ??
     stlCavityPlan?.size.gridX ??
     stlRetrofitPlan?.size.gridX ??
     Number(rawParams.gridX ?? template.defaultParams.gridX)
   const currentGridY =
-    memoryCardSummary?.size.gridY ??
-    photoOutlineSummary?.size.gridY ??
+    genericShapePlan?.size.gridY ??
+    memoryCardPlan?.size.gridY ??
+    photoOutlinePlan?.size.gridY ??
     stlCavityPlan?.size.gridY ??
     stlRetrofitPlan?.size.gridY ??
     Number(rawParams.gridY ?? template.defaultParams.gridY)
   const currentHeightUnits =
-    memoryCardSummary?.size.heightUnits ??
-    photoOutlineSummary?.size.heightUnits ??
+    genericShapePlan?.size.heightUnits ??
+    memoryCardPlan?.size.heightUnits ??
+    photoOutlinePlan?.size.heightUnits ??
     stlCavityPlan?.size.heightUnits ??
     stlRetrofitPlan?.size.heightUnits ??
     Number(rawParams.heightUnits ?? template.defaultParams.heightUnits)
+  const outerSizeLabel = formatSizeLabel([
+    gridUnitsToMillimeters(currentGridX, defaultGridfinitySpec),
+    gridUnitsToMillimeters(currentGridY, defaultGridfinitySpec),
+    heightUnitsToMillimeters(currentHeightUnits, defaultGridfinitySpec),
+  ])
+  const genericInnerSizeLabel =
+    templateId === 'generic-bin'
+      ? (() => {
+          const params = rawParams as GenericBinParams
+          const metrics = getBinMetrics(params, defaultGridfinitySpec)
+
+          return formatSizeLabel([
+            Math.max(0, metrics.outerX - Number(params.innerWallThicknessX ?? 0) * 2),
+            Math.max(0, metrics.outerY - Number(params.innerWallThicknessY ?? 0) * 2),
+            Math.max(
+              0,
+              metrics.height -
+                defaultGridfinitySpec.footHeight -
+                Number(params.innerWallThicknessZ ?? 0),
+            ),
+          ])
+        })()
+      : null
+  const summaryItems = resolveSummaryItems({
+    currentGridX,
+    currentGridY,
+    currentHeightUnits,
+    genericInnerSizeLabel,
+    genericShapePlan,
+    hasUnappliedChanges,
+    memoryCardPlan,
+    outerSizeLabel,
+    photoOutlinePlan,
+    rawParams,
+    stlCavityPlan,
+    stlRetrofitPlan,
+    templateId,
+  })
+  const summaryStatusLabel = resolveSummaryStatusLabel({
+    genericShapePlan,
+    hasUnappliedChanges,
+    memoryCardPlan,
+    photoOutlinePlan,
+    stlCavityPlan,
+    stlRetrofitPlan,
+    templateId,
+  })
+  const summaryWarnings =
+    generation?.warnings.length
+      ? generation.warnings
+      : genericShapePlan?.warnings.length
+        ? genericShapePlan.warnings
+        : memoryCardPlan?.warnings.length
+          ? memoryCardPlan.warnings
+          : photoOutlinePlan?.warnings.length
+            ? photoOutlinePlan.warnings
+            : stlCavityPlan?.warnings.length
+              ? stlCavityPlan.warnings
+              : stlRetrofitPlan?.warnings.length
+                ? stlRetrofitPlan.warnings
+                : []
+  const summaryPanel = (
+    <ModelSummaryPanel
+      items={summaryItems}
+      statusLabel={summaryStatusLabel}
+      warnings={summaryWarnings}
+    />
+  )
+  const exportDisabled =
+    Boolean(runtimeError) ||
+    validationErrors.length > 0 ||
+    hasUnappliedChanges ||
+    !generation ||
+    isGenerating ||
+    isExporting
+  const isDedicatedWorkflow =
+    templateId === 'photo-outline-bin' ||
+    templateId === 'stl-retrofit' ||
+    templateId === 'stl-cavity-bin'
+  const controlActionPanel =
+    !isDedicatedWorkflow ? (
+      <section className="panel panel--actions">
+        <div className="panel__header">
+          <div>
+            <p className="panel__eyebrow">主要操作</p>
+            <h2>导出与生成</h2>
+          </div>
+        </div>
+        <p className="panel__hint">
+          {templateId === 'parametric-cavity-bin'
+            ? hasUnappliedChanges
+              ? '先生成当前草稿，再导出 STL。'
+              : '当前草稿已同步到预览，可以直接导出 STL。'
+            : '参数校验通过后即可直接导出 STL。'}
+        </p>
+        <div className="button-row button-row--stack">
+          {templateId === 'parametric-cavity-bin' ? (
+            <button
+              className="button button--wide"
+              disabled={validationErrors.length > 0 || !hasUnappliedChanges || isGenerating}
+              type="button"
+              onClick={handleGenerateModel}
+            >
+              {isGenerating ? '生成中...' : '生成图形'}
+            </button>
+          ) : null}
+          <button
+            className={templateId === 'parametric-cavity-bin' ? 'button button--ghost button--wide' : 'button button--wide'}
+            disabled={exportDisabled}
+            type="button"
+            onClick={() => void handleExport()}
+          >
+            {isExporting ? '导出中...' : '导出 STL'}
+          </button>
+        </div>
+      </section>
+    ) : null
 
   function handleParamChange(key: string, value: JsonValue) {
     setRawParams((current) => {
@@ -259,10 +423,10 @@ export function GeneratorPage() {
           next.lockOuterSize = true
         }
 
-        if (key === 'lockOuterSize' && value === true && memoryCardSummary) {
-          next.gridX = memoryCardSummary.size.gridX
-          next.gridY = memoryCardSummary.size.gridY
-          next.heightUnits = memoryCardSummary.size.heightUnits
+        if (key === 'lockOuterSize' && value === true && memoryCardPlan) {
+          next.gridX = memoryCardPlan.size.gridX
+          next.gridY = memoryCardPlan.size.gridY
+          next.heightUnits = memoryCardPlan.size.heightUnits
         }
       }
 
@@ -302,6 +466,10 @@ export function GeneratorPage() {
     })
   }
 
+  function handleGenerateModel() {
+    setAppliedParams(rawParams)
+  }
+
   async function handleExport() {
     const stlBuffer = await exportModel()
     const blob = new Blob([stlBuffer], { type: 'model/stl' })
@@ -323,22 +491,18 @@ export function GeneratorPage() {
           <h1>{template.name}</h1>
           <p>{template.description}</p>
         </div>
-        <div className="hero__actions">
-          <button
-            className="button"
-            disabled={
-              Boolean(runtimeError) ||
-              validationErrors.length > 0 ||
-              !generation ||
-              isGenerating ||
-              isExporting
-            }
-            type="button"
-            onClick={() => void handleExport()}
-          >
-            {isExporting ? '导出中...' : '导出 STL'}
-          </button>
-        </div>
+        {isDedicatedWorkflow ? (
+          <div className="hero__actions">
+            <button
+              className="button"
+              disabled={exportDisabled}
+              type="button"
+              onClick={() => void handleExport()}
+            >
+              {isExporting ? '导出中...' : '导出 STL'}
+            </button>
+          </div>
+        ) : null}
       </header>
 
       <nav aria-label="模板切换" className="template-tabs">
@@ -367,6 +531,17 @@ export function GeneratorPage() {
             generation={generation}
             isGenerating={isGenerating}
             isPreviewPending={isPreviewPending}
+            summaryPanel={
+              <>
+                {summaryPanel}
+                {runtimeError ? (
+                  <div className="error-box" role="alert">
+                    <strong>生成失败</strong>
+                    <p>{runtimeError}</p>
+                  </div>
+                ) : null}
+              </>
+            }
             onChange={handleParamChange}
             onReset={() => {
               setRawParams(template.defaultParams)
@@ -380,6 +555,17 @@ export function GeneratorPage() {
             isGenerating={isGenerating}
             isImporting={isImporting}
             isPreviewPending={isPreviewPending}
+            summaryPanel={
+              <>
+                {summaryPanel}
+                {runtimeError ? (
+                  <div className="error-box" role="alert">
+                    <strong>生成失败</strong>
+                    <p>{runtimeError}</p>
+                  </div>
+                ) : null}
+              </>
+            }
             onChange={handleParamChange}
             onImport={importStlSource}
             onReset={() => {
@@ -394,6 +580,17 @@ export function GeneratorPage() {
             isGenerating={isGenerating}
             isImporting={isImporting}
             isPreviewPending={isPreviewPending}
+            summaryPanel={
+              <>
+                {summaryPanel}
+                {runtimeError ? (
+                  <div className="error-box" role="alert">
+                    <strong>生成失败</strong>
+                    <p>{runtimeError}</p>
+                  </div>
+                ) : null}
+              </>
+            }
             onChange={handleParamChange}
             onImport={importStlSource}
             onReset={() => {
@@ -404,229 +601,228 @@ export function GeneratorPage() {
           />
         ) : (
           <>
-            <ParameterPanel
-              key={template.id}
-              template={template}
-              validationErrors={validationErrors}
-              values={rawParams}
-              onChange={handleParamChange}
-              onReset={() => {
-                setRawParams(template.defaultParams)
-              }}
-            />
+            {templateId === 'parametric-cavity-bin' ? (
+              <ParametricCavityWorkflow
+                actionPanel={controlActionPanel}
+                hasPendingChanges={hasUnappliedChanges}
+                isPreviewPending={hasUnappliedChanges || isPreviewPending}
+                template={template as TemplateDefinition<ParametricCavityBinParams>}
+                validationErrors={validationErrors}
+                values={parametricCavityParams as ParametricCavityBinParams}
+                onChange={handleParamChange}
+                onReset={() => {
+                  setRawParams(template.defaultParams)
+                }}
+              />
+            ) : (
+              <div className="control-stack">
+                <ParameterPanel
+                  key={template.id}
+                  template={template}
+                  validationErrors={validationErrors}
+                  values={rawParams}
+                  onChange={handleParamChange}
+                  onReset={() => {
+                    setRawParams(template.defaultParams)
+                  }}
+                />
+                {controlActionPanel}
+              </div>
+            )}
 
-            <PreviewCanvas
-              bounds={generation?.bounds ?? null}
-              isLoading={isGenerating}
-              isPending={isPreviewPending}
-              positions={generation?.meshData.positions ?? null}
-            />
+            <div className="results-column">
+              {summaryPanel}
+              <PreviewCanvas
+                bounds={generation?.bounds ?? null}
+                isLoading={isGenerating}
+                isPending={hasUnappliedChanges || isPreviewPending}
+                pendingLabel={hasUnappliedChanges ? '草稿待生成' : '等待更新...'}
+                positions={generation?.meshData.positions ?? null}
+              />
+              {runtimeError ? (
+                <div className="error-box" role="alert">
+                  <strong>生成失败</strong>
+                  <p>{runtimeError}</p>
+                </div>
+              ) : null}
+            </div>
           </>
         )}
-
-        <aside className="panel panel--info">
-          <div className="panel__header">
-            <div>
-              <p className="panel__eyebrow">规格摘要</p>
-              <h2>当前模型</h2>
-            </div>
-          </div>
-
-          <div className="stats-grid">
-            <div className="stat-card">
-              <span>外部宽度</span>
-              <strong>{gridUnitsToMillimeters(currentGridX).toFixed(1)} mm</strong>
-            </div>
-            <div className="stat-card">
-              <span>外部深度</span>
-              <strong>{gridUnitsToMillimeters(currentGridY).toFixed(1)} mm</strong>
-            </div>
-            <div className="stat-card">
-              <span>总高度</span>
-              <strong>{heightUnitsToMillimeters(currentHeightUnits).toFixed(1)} mm</strong>
-            </div>
-            <div className="stat-card">
-              <span>网格包围盒</span>
-              <strong>
-                {generation
-                  ? `${generation.bounds.size[0].toFixed(1)} x ${generation.bounds.size[1].toFixed(1)} x ${generation.bounds.size[2].toFixed(1)}`
-                  : '等待生成'}
-              </strong>
-            </div>
-          </div>
-
-          <div className="info-section">
-            <h3>兼容规则</h3>
-            <ul>
-              <li>XY 节距: 42mm</li>
-              <li>高度单位: 7mm</li>
-              <li>外轮廓按 41.5mm 方块兼容</li>
-              <li>磁铁孔规格: 6 x 2mm</li>
-            </ul>
-          </div>
-
-          <div className="info-section">
-            <h3>模板特性</h3>
-            <ul>
-              {template.previewFacts.map((fact) => (
-                <li key={fact}>{fact}</li>
-              ))}
-            </ul>
-          </div>
-
-          {memoryCardSummary ? (
-            <div className="info-section">
-              <h3>{memoryCardSummary.isAutoSized ? '自动推荐尺寸' : '固定外部尺寸'}</h3>
-              <ul>
-                <li>
-                  推荐尺寸: {memoryCardSummary.size.gridX} x {memoryCardSummary.size.gridY} x{' '}
-                  {memoryCardSummary.size.heightUnits}
-                </li>
-                <li>布局方式: {memoryCardSummary.arrangementLabel}</li>
-                <li>总卡数: {memoryCardSummary.quantity}</li>
-              </ul>
-            </div>
-          ) : null}
-
-          {photoOutlineSummary ? (
-            <div className="info-section">
-              <h3>轮廓求解结果</h3>
-              <ul>
-                <li>
-                  推荐尺寸: {photoOutlineSummary.size.gridX} x {photoOutlineSummary.size.gridY} x{' '}
-                  {photoOutlineSummary.size.heightUnits}
-                </li>
-                <li>摆放方向: {photoOutlineSummary.orientationLabel}</li>
-                <li>
-                  轮廓尺寸: {photoOutlineSummary.contourWidthMm.toFixed(1)} x{' '}
-                  {photoOutlineSummary.contourHeightMm.toFixed(1)} mm
-                </li>
-                <li>缩放比例: {photoOutlineSummary.mmPerPixel.toFixed(4)} mm/px</li>
-                <li>关键点数量: {photoOutlineSummary.pointCount}</li>
-              </ul>
-            </div>
-          ) : null}
-
-          {stlCavityPlan ? (
-            <div className="info-section">
-              <h3>{stlCavityPlan.isAutoSized ? '自动推荐尺寸' : '固定外部尺寸'}</h3>
-              <ul>
-                <li>
-                  推荐尺寸: {stlCavityPlan.size.gridX} x {stlCavityPlan.size.gridY} x{' '}
-                  {stlCavityPlan.size.heightUnits}
-                </li>
-                <li>
-                  旋转后尺寸: {stlCavityPlan.rotatedSizeMm[0].toFixed(1)} x{' '}
-                  {stlCavityPlan.rotatedSizeMm[1].toFixed(1)} x{' '}
-                  {stlCavityPlan.rotatedSizeMm[2].toFixed(1)} mm
-                </li>
-                <li>
-                  型腔占位: {stlCavityPlan.cavitySizeMm[0].toFixed(1)} x{' '}
-                  {stlCavityPlan.cavitySizeMm[1].toFixed(1)} x{' '}
-                  {stlCavityPlan.cavitySizeMm[2].toFixed(1)} mm
-                </li>
-                <li>顶部余量: {stlCavityPlan.topClearanceMm.toFixed(1)} mm</li>
-                <li>外形规则: 标准矩形外壳 + STL 负形</li>
-              </ul>
-            </div>
-          ) : null}
-
-          {stlRetrofitPlan ? (
-            <div className="info-section">
-              <h3>{stlRetrofitPlan.isAutoSized ? '自动推荐尺寸' : '固定外部尺寸'}</h3>
-              <ul>
-                <li>
-                  推荐尺寸: {stlRetrofitPlan.size.gridX} x {stlRetrofitPlan.size.gridY} x{' '}
-                  {stlRetrofitPlan.size.heightUnits}
-                </li>
-                <li>
-                  旋转后尺寸: {stlRetrofitPlan.rotatedSizeMm[0].toFixed(1)} x{' '}
-                  {stlRetrofitPlan.rotatedSizeMm[1].toFixed(1)} x{' '}
-                  {stlRetrofitPlan.rotatedSizeMm[2].toFixed(1)} mm
-                </li>
-                <li>切除深度: {stlParams ? stlParams.cutDepth.toFixed(1) : '0.0'} mm</li>
-                <li>底座高度: {stlRetrofitPlan.baseHeightMm.toFixed(1)} mm</li>
-                <li>外形规则: 规整为标准矩形实体</li>
-                <li>顶部规则: {stlParams?.stackingLip ? '标准堆叠口' : '标准平顶'}</li>
-                <li>总高度: {stlRetrofitPlan.totalHeightMm.toFixed(1)} mm</li>
-              </ul>
-            </div>
-          ) : null}
-
-          {templateId === 'photo-outline-bin' ? (
-            <div className="info-section">
-              <h3>标尺校准</h3>
-              <ul>
-                <li>
-                  标尺状态:{' '}
-                  {photoParams?.analysis?.ruler.status === 'detected'
-                      ? '已识别'
-                      : photoParams?.analysis
-                        ? '未识别'
-                        : '等待上传'}
-                </li>
-                <li>已知尺寸: 80 x 60 mm L 形标尺</li>
-                <li>
-                  <a download href={PHOTO_OUTLINE_RULER_DOWNLOAD_PATH}>
-                    下载标尺 STL
-                  </a>
-                </li>
-                <li>
-                  <a download href={PHOTO_OUTLINE_A4_SHEET_DOWNLOAD_PATH}>
-                    下载 A4 校准底纸 SVG
-                  </a>
-                </li>
-                <li>A4 底纸: 当前 V1 仍以内嵌 L 标尺校准，角标供后续整页校准升级</li>
-                <li>首版边界: 单物体、俯拍、干净背景、同平面校准</li>
-              </ul>
-            </div>
-          ) : null}
-
-          {templateId === 'stl-cavity-bin' ? (
-            <div className="info-section">
-              <h3>源模型状态</h3>
-              <ul>
-                <li>上传状态: {stlCavityParams?.source ? '已导入' : '等待上传'}</li>
-                <li>旋转限制: 仅支持 X / Y / Z 的 90° 步进旋转</li>
-                <li>输入边界: 仅支持单个封闭实体 STL</li>
-                <li>型腔策略: 使用真实 STL 几何减去内部负形</li>
-                <li>开口策略: 顶部入口直接贯通到顶面</li>
-              </ul>
-            </div>
-          ) : null}
-
-          {templateId === 'stl-retrofit' ? (
-            <div className="info-section">
-              <h3>源模型状态</h3>
-              <ul>
-                <li>上传状态: {stlParams?.source ? '已导入' : '等待上传'}</li>
-                <li>旋转限制: 仅支持 X / Y / Z 的 90° 步进旋转</li>
-                <li>输入边界: 仅支持单个封闭实体 STL</li>
-                <li>外形策略: 整体外形会规整为标准矩形</li>
-                <li>高度策略: 通过补高标准实体对齐到标准 7mm 单位</li>
-              </ul>
-            </div>
-          ) : null}
-
-          {generation?.warnings.length ? (
-            <div className="warning-box">
-              <strong>自动调整</strong>
-              <ul>
-                {generation.warnings.map((warning) => (
-                  <li key={warning}>{warning}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-
-          {runtimeError ? (
-            <div className="error-box" role="alert">
-              <strong>生成失败</strong>
-              <p>{runtimeError}</p>
-            </div>
-          ) : null}
-        </aside>
       </section>
     </main>
   )
+}
+
+interface SummaryContext {
+  currentGridX: number
+  currentGridY: number
+  currentHeightUnits: number
+  genericInnerSizeLabel: string | null
+  genericShapePlan: ReturnType<typeof resolveGenericShapeCavityPlan> | null
+  hasUnappliedChanges: boolean
+  memoryCardPlan: ReturnType<typeof resolveMemoryCardPlan> | null
+  outerSizeLabel: string
+  photoOutlinePlan: ReturnType<typeof resolvePhotoOutlinePlan> | null
+  rawParams: ParameterValues
+  stlCavityPlan: ReturnType<typeof resolveStlCavityBinPlan> | null
+  stlRetrofitPlan: ReturnType<typeof resolveStlRetrofitPlan> | null
+  templateId: TemplateId
+}
+
+function resolveSummaryItems(context: SummaryContext) {
+  const {
+    currentGridX,
+    currentGridY,
+    currentHeightUnits,
+    genericInnerSizeLabel,
+    genericShapePlan,
+    memoryCardPlan,
+    outerSizeLabel,
+    photoOutlinePlan,
+    rawParams,
+    stlCavityPlan,
+    stlRetrofitPlan,
+    templateId,
+  } = context
+
+  const gridSizeLabel = `${currentGridX} x ${currentGridY} x ${currentHeightUnits}`
+
+  if (templateId === 'generic-bin') {
+    const params = rawParams as GenericBinParams
+
+    return [
+      { label: '外部尺寸', value: outerSizeLabel },
+      { label: '内部有效尺寸', value: genericInnerSizeLabel ?? '等待输入' },
+      { label: 'Gridfinity 占位', value: gridSizeLabel },
+      { label: '分仓布局', value: `${params.compartmentsX} x ${params.compartmentsY}` },
+    ]
+  }
+
+  if (templateId === 'memory-card-tray' && memoryCardPlan) {
+    return [
+      { label: '外部尺寸', value: outerSizeLabel },
+      {
+        label: '内部有效尺寸',
+        value: formatSizeLabel([
+          memoryCardPlan.trayWidth,
+          memoryCardPlan.trayDepth,
+          Math.max(0, memoryCardPlan.trayTopZ - memoryCardPlan.trayBottomZ),
+        ]),
+      },
+      { label: 'Gridfinity 占位', value: gridSizeLabel },
+      { label: '关键容量', value: `${memoryCardPlan.quantity} 张 · ${memoryCardPlan.arrangementLabel}` },
+    ]
+  }
+
+  if (templateId === 'parametric-cavity-bin' && genericShapePlan) {
+    const arrangementMode = (rawParams as ParametricCavityBinParams).arrangementMode
+
+    const metrics = getBinMetrics(genericShapePlan.resolvedParams, defaultGridfinitySpec)
+
+    return [
+      { label: '外部尺寸', value: outerSizeLabel },
+      {
+        label: '内部有效尺寸',
+        value: formatSizeLabel([
+          metrics.innerX,
+          metrics.innerY,
+          genericShapePlan.usableCavityDepthMm,
+        ]),
+      },
+      { label: 'Gridfinity 占位', value: gridSizeLabel },
+      {
+        label: '排布规则',
+        value: arrangementMode === 'y-first' ? 'Y -> X -> Z' : 'X -> Y -> Z',
+      },
+      { label: '关键容量', value: `${genericShapePlan.totalCavityCount} 个型腔` },
+    ]
+  }
+
+  if (templateId === 'photo-outline-bin' && photoOutlinePlan) {
+    const params = rawParams as PhotoOutlineBinParams
+
+    return [
+      { label: '外部尺寸', value: outerSizeLabel },
+      {
+        label: '内部有效尺寸',
+        value: formatSizeLabel([
+          photoOutlinePlan.contourWidthMm + Number(params.cavityClearance ?? 0) * 2,
+          photoOutlinePlan.contourHeightMm + Number(params.cavityClearance ?? 0) * 2,
+          photoOutlinePlan.cavityDepth,
+        ]),
+      },
+      { label: 'Gridfinity 占位', value: gridSizeLabel },
+      {
+        label: '关键摘要',
+        value: `${photoOutlinePlan.orientation === 90 ? '90°' : '0°'} · ${photoOutlinePlan.cavityPointsMm.length} 点`,
+      },
+    ]
+  }
+
+  if (templateId === 'stl-cavity-bin' && stlCavityPlan) {
+    return [
+      { label: '外部尺寸', value: outerSizeLabel },
+      { label: '内部有效尺寸', value: formatSizeLabel(stlCavityPlan.cavitySizeMm) },
+      { label: 'Gridfinity 占位', value: gridSizeLabel },
+      { label: '关键摘要', value: `顶部余量 ${stlCavityPlan.topClearanceMm.toFixed(1)} mm` },
+    ]
+  }
+
+  if (templateId === 'stl-retrofit' && stlRetrofitPlan) {
+    return [
+      { label: '外部尺寸', value: outerSizeLabel },
+      { label: '适配模型尺寸', value: formatSizeLabel(stlRetrofitPlan.rotatedSizeMm) },
+      { label: 'Gridfinity 占位', value: gridSizeLabel },
+      {
+        label: '关键摘要',
+        value: `切除深度 ${Number((rawParams as StlRetrofitParams).cutDepth ?? 0).toFixed(1)} mm`,
+      },
+    ]
+  }
+
+  return [
+    { label: '外部尺寸', value: outerSizeLabel },
+    { label: 'Gridfinity 占位', value: gridSizeLabel },
+  ]
+}
+
+function resolveSummaryStatusLabel(context: Pick<
+  SummaryContext,
+  | 'genericShapePlan'
+  | 'hasUnappliedChanges'
+  | 'memoryCardPlan'
+  | 'photoOutlinePlan'
+  | 'stlCavityPlan'
+  | 'stlRetrofitPlan'
+  | 'templateId'
+>) {
+  if (context.templateId === 'parametric-cavity-bin' && context.hasUnappliedChanges) {
+    return '草稿未生成'
+  }
+
+  if (context.templateId === 'memory-card-tray' && context.memoryCardPlan) {
+    return context.memoryCardPlan.resolvedParams.lockOuterSize ? '固定尺寸' : '自动推荐'
+  }
+
+  if (context.templateId === 'parametric-cavity-bin' && context.genericShapePlan) {
+    return '手动尺寸 / 自动排布'
+  }
+
+  if (context.templateId === 'photo-outline-bin' && context.photoOutlinePlan) {
+    return '自动推荐'
+  }
+
+  if (context.templateId === 'stl-cavity-bin' && context.stlCavityPlan) {
+    return context.stlCavityPlan.isAutoSized ? '自动推荐' : '固定尺寸'
+  }
+
+  if (context.templateId === 'stl-retrofit' && context.stlRetrofitPlan) {
+    return context.stlRetrofitPlan.isAutoSized ? '自动推荐' : '固定尺寸'
+  }
+
+  return '当前配置'
+}
+
+function formatSizeLabel(size: [number, number, number]) {
+  return `${size[0].toFixed(1)} x ${size[1].toFixed(1)} x ${size[2].toFixed(1)} mm`
 }

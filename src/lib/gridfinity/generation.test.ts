@@ -2,6 +2,10 @@ import { booleans, measurements, primitives } from '@jscad/modeling'
 
 import { createBaseBinSolid } from './base'
 import { createBuildContext, generateModel, serializeGeometryToStlParts } from './generation'
+import {
+  createDefaultGenericShapeEntry,
+  resolveGenericShapeCavityPlan,
+} from './genericShapeCavity'
 import { resolveMemoryCardPlan } from './memoryCard'
 import {
   createPhotoOutlineFixtureAnalysis,
@@ -15,6 +19,7 @@ import type {
   BaseBinParams,
   ImportedAssetRecord,
   MemoryCardTrayParams,
+  ParametricCavityBinParams,
   PhotoOutlineBinParams,
   StlCavityBinParams,
   StlRetrofitParams,
@@ -114,7 +119,7 @@ describe('gridfinity model generation', () => {
       const baseSolid = createBaseBinSolid(baseParams, defaultGridfinitySpec)
       const carvedRatio = measureVolume(geometry) / measureVolume(baseSolid)
 
-      expect(carvedRatio).toBeLessThan(0.96)
+      expect(carvedRatio).toBeLessThan(template.id === 'parametric-cavity-bin' ? 0.98 : 0.96)
     },
   )
 
@@ -131,6 +136,95 @@ describe('gridfinity model generation', () => {
       }),
     ).toThrow()
   })
+
+  it('creates multiple independent primitive cavities for the parametric cavity template', () => {
+    const template = templateList.find((candidate) => candidate.id === 'parametric-cavity-bin')!
+    const params: ParametricCavityBinParams = {
+      ...(template.defaultParams as ParametricCavityBinParams),
+      gridX: 2,
+      gridY: 1,
+      heightUnits: 3,
+      shapeEntries: [
+        {
+          ...createDefaultGenericShapeEntry(1),
+          label: '矩形块',
+          quantity: 1,
+          width: 24,
+          depth: 16,
+          height: 8,
+        },
+        {
+          ...createDefaultGenericShapeEntry(2),
+          label: '圆片',
+          kind: 'circle',
+          quantity: 1,
+          diameter: 18,
+          height: 5,
+        },
+      ],
+    }
+    const plan = resolveGenericShapeCavityPlan(params, defaultGridfinitySpec)
+    const { geometry } = generateModel({
+      templateId: 'parametric-cavity-bin',
+      params,
+      specVersion: defaultGridfinitySpec.version,
+    })
+    const baseSolid = createBaseBinSolid(plan.resolvedParams, defaultGridfinitySpec)
+    const cavity = subtract(baseSolid, geometry)
+    const probes = plan.placedInstances.map((instance) =>
+      intersect(
+        cavity,
+        cuboid({
+          size: [
+            Math.max(4, instance.footprintX * 0.45),
+            Math.max(4, instance.footprintY * 0.45),
+            Math.max(2, Math.min(4, instance.cavityHeight - 0.4)),
+          ],
+          center: [
+            instance.centerX,
+            instance.centerY,
+            plan.cavityBottomZ + Math.max(2, Math.min(4, instance.cavityHeight - 0.4)) / 2,
+          ],
+        }),
+      ),
+    )
+    const sortedInstances = [...plan.placedInstances].sort(
+      (left, right) => left.centerX - right.centerX || left.centerY - right.centerY,
+    )
+    const first = sortedInstances[0]
+    const second = sortedInstances[1]
+    const xGap =
+      second.centerX -
+      second.footprintX / 2 -
+      (first.centerX + first.footprintX / 2)
+    const yGap =
+      second.centerY -
+      second.footprintY / 2 -
+      (first.centerY + first.footprintY / 2)
+    const bridgeProbeCenter =
+      xGap > 0.8
+        ? [
+            first.centerX + first.footprintX / 2 + xGap / 2,
+            (first.centerY + second.centerY) / 2,
+            plan.cavityBottomZ + 1,
+          ]
+        : [
+            (first.centerX + second.centerX) / 2,
+            first.centerY + first.footprintY / 2 + yGap / 2,
+            plan.cavityBottomZ + 1,
+          ]
+    const bridgeProbe = intersect(
+      cavity,
+      cuboid({
+        size: [1.2, 1.2, 1.2],
+        center: bridgeProbeCenter as [number, number, number],
+      }),
+    )
+
+    expect(plan.totalCavityCount).toBe(2)
+    expect(probes.every((probe) => measureVolume(probe) > 10)).toBe(true)
+    expect(measureVolume(bridgeProbe)).toBeLessThan(1)
+  }, 15000)
 
   it('extracts a valid plan for the photo outline template fixture', () => {
     const plan = resolvePhotoOutlinePlan(
@@ -252,6 +346,60 @@ describe('gridfinity model generation', () => {
     expect(upperDepth).toBeCloseTo(12, 1)
     expect(upperCenterX).toBeGreaterThan(4)
     expect(upperWidth).toBeLessThan(lowerWidth - 8)
+  })
+
+  it('adds XY clearance without scaling narrow upper features for the cavity bin', () => {
+    const fixture = createIrregularStlFixtureAsset()
+    const template = templateList.find((candidate) => candidate.id === 'stl-cavity-bin')!
+    const params: StlCavityBinParams = {
+      ...(template.defaultParams as StlCavityBinParams),
+      source: fixture.summary,
+      xyClearance: 1,
+      zClearance: 0,
+    }
+    const plan = resolveStlCavityBinPlan(params, defaultGridfinitySpec)
+    const { geometry } = generateModel(
+      {
+        templateId: 'stl-cavity-bin',
+        params,
+        specVersion: defaultGridfinitySpec.version,
+      },
+      createBuildContext(new Map([[fixture.summary.assetId, fixture]])),
+    )
+    const baseSolid = createBaseBinSolid(plan.resolvedParams, defaultGridfinitySpec)
+    const cavity = subtract(baseSolid, geometry)
+    const lowerSlice = intersect(
+      cavity,
+      cuboid({
+        size: [120, 120, 0.08],
+        center: [0, 0, plan.cavityBottomZ + 2],
+      }),
+    )
+    const upperSlice = intersect(
+      cavity,
+      cuboid({
+        size: [120, 120, 0.08],
+        center: [0, 0, plan.cavityBottomZ + 10],
+      }),
+    )
+    const [[lowerMinX], [lowerMaxX]] = measurements.measureBoundingBox(lowerSlice) as [
+      [number, number, number],
+      [number, number, number],
+    ]
+    const [[upperMinX, upperMinY], [upperMaxX, upperMaxY]] =
+      measurements.measureBoundingBox(upperSlice) as [
+        [number, number, number],
+        [number, number, number],
+      ]
+    const lowerWidth = lowerMaxX - lowerMinX
+    const upperWidth = upperMaxX - upperMinX
+    const upperDepth = upperMaxY - upperMinY
+    const upperCenterX = (upperMinX + upperMaxX) / 2
+
+    expect(lowerWidth).toBeCloseTo(22, 1)
+    expect(upperWidth).toBeCloseTo(10, 1)
+    expect(upperDepth).toBeCloseTo(14, 1)
+    expect(upperCenterX).toBeCloseTo(6, 1)
   })
 })
 

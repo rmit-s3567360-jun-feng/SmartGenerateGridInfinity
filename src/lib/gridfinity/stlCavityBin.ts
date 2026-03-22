@@ -1,4 +1,4 @@
-import { booleans, measurements, transforms } from '@jscad/modeling'
+import { booleans, expansions, measurements, primitives, transforms } from '@jscad/modeling'
 import type Geom3 from '@jscad/modeling/src/geometries/geom3/type'
 
 import { createBaseBinSolid, createPocketBetween } from './base'
@@ -17,12 +17,15 @@ import type {
   TemplateBuildOutput,
 } from './types'
 
-const { subtract, union } = booleans
+const { intersect, subtract, union } = booleans
+const { expand } = expansions
 const { measureBoundingBox } = measurements
-const { rotateX, rotateY, rotateZ, scale, translate } = transforms
+const { cuboid } = primitives
+const { rotateX, rotateY, rotateZ, translate } = transforms
 
 const STL_CAVITY_EDGE_MARGIN_MM = 4
 const STL_BOOLEAN_OVERLAP_MM = 0.02
+const STL_CAVITY_CLEARANCE_SEGMENTS = 16
 
 export const stlCavityBinDefaultParams: StlCavityBinParams = {
   source: null,
@@ -258,28 +261,63 @@ function createCavityGeometry(
   source: ImportedStlSourceSummary,
   params: Pick<
     StlCavityBinParams,
-    'rotationX' | 'rotationY' | 'rotationZ'
+    'rotationX' | 'rotationY' | 'rotationZ' | 'xyClearance'
   >,
   plan: StlCavityBinPlan,
 ) {
   const normalized = normalizeRotatedGeometry(geometry, source, params)
-  const [[minX, minY], [maxX, maxY]] = measureBoundingBox(normalized) as [
+  const [[minX, minY, minZ], [maxX, maxY, maxZ]] = measureBoundingBox(normalized) as [
     [number, number, number],
     [number, number, number],
   ]
   const width = maxX - minX
   const depth = maxY - minY
+  const height = maxZ - minZ
 
-  if (width <= 0 || depth <= 0) {
+  if (width <= 0 || depth <= 0 || height <= 0) {
     throw new Error('导入 STL 的包围盒尺寸无效。')
   }
 
-  const clearanced = scale(
-    [plan.cavitySizeMm[0] / width, plan.cavitySizeMm[1] / depth, 1],
-    normalized,
-  ) as Geom3
+  const clearanced =
+    params.xyClearance > 0
+      ? createHorizontallyExpandedGeometry(
+          normalized,
+          width,
+          depth,
+          height,
+          params.xyClearance,
+        )
+      : normalized
 
   return translate([0, 0, plan.cavityBottomZ], clearanced)
+}
+
+function createHorizontallyExpandedGeometry(
+  geometry: Geom3,
+  width: number,
+  depth: number,
+  height: number,
+  clearance: number,
+) {
+  // Expand the imported solid itself in XY, then clip back to the source height.
+  const expanded = expand(
+    {
+      delta: clearance,
+      corners: 'round',
+      segments: STL_CAVITY_CLEARANCE_SEGMENTS,
+    },
+    geometry,
+  ) as Geom3
+  const zClip = cuboid({
+    size: [
+      width + clearance * 4 + 2,
+      depth + clearance * 4 + 2,
+      height,
+    ],
+    center: [0, 0, height / 2],
+  })
+
+  return intersect(expanded, zClip) as Geom3
 }
 
 function normalizeRotatedGeometry(

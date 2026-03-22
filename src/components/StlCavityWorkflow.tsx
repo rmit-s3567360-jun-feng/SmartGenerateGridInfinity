@@ -1,4 +1,4 @@
-import type { ChangeEvent } from 'react'
+import type { ChangeEvent, ReactNode } from 'react'
 import { useState } from 'react'
 
 import type {
@@ -7,6 +7,8 @@ import type {
   JsonValue,
   StlCavityBinParams,
 } from '../lib/gridfinity/types'
+import { AxisInspectorGroup } from './AxisInspectorGroup'
+import { FieldHint } from './FieldHint'
 import { NumericFieldControl } from './NumericFieldControl'
 import { PreviewCanvas } from './PreviewCanvas'
 
@@ -17,12 +19,11 @@ interface StlCavityWorkflowProps {
   isGenerating: boolean
   isPreviewPending: boolean
   isImporting: boolean
+  summaryPanel?: ReactNode
   onChange: (key: string, value: JsonValue) => void
   onImport: (file: File) => Promise<ImportedStlSourceSummary>
   onReset: () => void
 }
-
-const rotationLabelMap = ['0°', '90°', '180°', '270°'] as const
 
 export function StlCavityWorkflow({
   values,
@@ -31,6 +32,7 @@ export function StlCavityWorkflow({
   isGenerating,
   isPreviewPending,
   isImporting,
+  summaryPanel,
   onChange,
   onImport,
   onReset,
@@ -54,12 +56,6 @@ export function StlCavityWorkflow({
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : '导入 STL 失败。')
     }
-  }
-
-  function rotateAxis(key: 'rotationX' | 'rotationY' | 'rotationZ') {
-    const nextValue = ((Number(values[key]) + 1) % 4) as StlCavityBinParams[typeof key]
-
-    onChange(key, nextValue)
   }
 
   function handleReset() {
@@ -102,8 +98,10 @@ export function StlCavityWorkflow({
         ) : null}
 
         <label className="photo-upload-box">
-          <span>上传物品 STL</span>
-          <small>支持 ASCII STL 和 Binary STL。首版只接受可稳定求解的封闭实体。</small>
+          <div className="form-field__top">
+            <span>上传物品 STL</span>
+            <FieldHint text="支持 ASCII STL 和 Binary STL。首版只接受可稳定求解的封闭实体。" />
+          </div>
           <input accept=".stl,model/stl" type="file" onChange={handleFileSelect} />
         </label>
 
@@ -137,28 +135,41 @@ export function StlCavityWorkflow({
           </div>
         ) : null}
 
-        <div className="stl-rotation-grid">
-          <RotationCard
-            axis="X"
-            value={rotationLabelMap[values.rotationX]}
-            onRotate={() => rotateAxis('rotationX')}
-          />
-          <RotationCard
-            axis="Y"
-            value={rotationLabelMap[values.rotationY]}
-            onRotate={() => rotateAxis('rotationY')}
-          />
-          <RotationCard
-            axis="Z"
-            value={rotationLabelMap[values.rotationZ]}
-            onRotate={() => rotateAxis('rotationZ')}
-          />
-        </div>
+        <AxisInspectorGroup
+          description="用 Unity Inspector 风格的 X / Y / Z 旋转快速摆正模型。"
+          items={[
+            {
+              axis: 'x',
+              value: String(values.rotationX),
+              options: rotationOptions,
+              caption: 'X 轴旋转',
+              onChange: (nextValue) => onChange('rotationX', Number(nextValue)),
+            },
+            {
+              axis: 'y',
+              value: String(values.rotationY),
+              options: rotationOptions,
+              caption: 'Y 轴旋转',
+              onChange: (nextValue) => onChange('rotationY', Number(nextValue)),
+            },
+            {
+              axis: 'z',
+              value: String(values.rotationZ),
+              options: rotationOptions,
+              caption: 'Z 轴旋转',
+              onChange: (nextValue) => onChange('rotationZ', Number(nextValue)),
+            },
+          ]}
+          title="旋转"
+        />
 
         <label className="form-field">
-          <span>尺寸模式</span>
-          <small>自动模式会搜索最小可用外部尺寸；固定模式使用你手动指定的 Gridfinity 尺寸。</small>
+          <div className="form-field__top">
+            <span>尺寸模式</span>
+            <FieldHint text="自动模式会搜索最小可用外部尺寸；固定模式使用你手动指定的 Gridfinity 尺寸。" />
+          </div>
           <select
+            aria-label="尺寸模式"
             value={values.sizeMode}
             onChange={(event) => onChange('sizeMode', event.target.value)}
           >
@@ -169,37 +180,42 @@ export function StlCavityWorkflow({
 
         <div className="form-grid">
           {values.sizeMode === 'locked' ? (
-            <>
-              <NumericFieldControl
-                description="固定 Gridfinity X 占位。"
-                label="宽度单元"
-                max={8}
-                min={1}
-                step={1}
-                value={values.gridX}
-                onChange={(value) => onChange('gridX', normalizeNumberControlValue(value))}
-              />
-              <NumericFieldControl
-                description="固定 Gridfinity Y 占位。"
-                label="深度单元"
-                max={8}
-                min={1}
-                step={1}
-                value={values.gridY}
-                onChange={(value) => onChange('gridY', normalizeNumberControlValue(value))}
-              />
-              <NumericFieldControl
-                description="固定最终高度单位。"
-                label="高度单元"
-                max={24}
-                min={2}
-                step={1}
-                value={values.heightUnits}
-                onChange={(value) =>
-                  onChange('heightUnits', normalizeNumberControlValue(value))
-                }
-              />
-            </>
+            <AxisInspectorGroup
+              description="固定模式下直接指定 Gridfinity 外部占位，和预览坐标轴一致。"
+              items={[
+                {
+                  axis: 'x',
+                  value: values.gridX,
+                  min: 1,
+                  max: 8,
+                  step: 1,
+                  caption: 'X 占位单元',
+                  onChange: (nextValue) =>
+                    onChange('gridX', normalizeNumberControlValue(nextValue)),
+                },
+                {
+                  axis: 'y',
+                  value: values.gridY,
+                  min: 1,
+                  max: 8,
+                  step: 1,
+                  caption: 'Y 占位单元',
+                  onChange: (nextValue) =>
+                    onChange('gridY', normalizeNumberControlValue(nextValue)),
+                },
+                {
+                  axis: 'z',
+                  value: values.heightUnits,
+                  min: 2,
+                  max: 24,
+                  step: 1,
+                  caption: 'Z 高度单位',
+                  onChange: (nextValue) =>
+                    onChange('heightUnits', normalizeNumberControlValue(nextValue)),
+                },
+              ]}
+              title="外部尺寸"
+            />
           ) : null}
 
           <NumericFieldControl
@@ -235,7 +251,7 @@ export function StlCavityWorkflow({
           />
 
           <NumericFieldControl
-            description="底脚之上的内部底板厚度。"
+            description="底脚之上的内部底板厚度；从模型最底面量会再叠加底脚高度。"
             label="底板厚度"
             max={5}
             min={1.2}
@@ -248,9 +264,9 @@ export function StlCavityWorkflow({
         </div>
 
         <label className="toggle-field">
-          <div>
+          <div className="form-field__top">
             <span>磁铁孔</span>
-            <small>沿用当前每格 4 孔、6 x 2mm 的磁铁孔布局。</small>
+            <FieldHint text="沿用当前每格 4 孔、6 x 2mm 的磁铁孔布局。" />
           </div>
           <input
             checked={values.magnetHoles}
@@ -261,6 +277,7 @@ export function StlCavityWorkflow({
       </section>
 
       <div className="stl-results-column">
+        {summaryPanel}
         <PreviewCanvas
           bounds={generation?.bounds ?? null}
           isLoading={isGenerating}
@@ -289,23 +306,12 @@ export function StlCavityWorkflow({
   )
 }
 
-interface RotationCardProps {
-  axis: 'X' | 'Y' | 'Z'
-  value: string
-  onRotate: () => void
-}
-
-function RotationCard({ axis, value, onRotate }: RotationCardProps) {
-  return (
-    <div className="stl-rotation-card">
-      <span>{axis} 轴旋转</span>
-      <strong>{value}</strong>
-      <button className="button button--ghost" type="button" onClick={onRotate}>
-        {axis} +90°
-      </button>
-    </div>
-  )
-}
+const rotationOptions = [
+  { label: '0°', value: '0' },
+  { label: '90°', value: '1' },
+  { label: '180°', value: '2' },
+  { label: '270°', value: '3' },
+]
 
 function normalizeNumberControlValue(value: number | string) {
   if (typeof value === 'number') {

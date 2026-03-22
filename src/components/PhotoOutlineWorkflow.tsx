@@ -1,4 +1,4 @@
-import type { ChangeEvent } from 'react'
+import type { ChangeEvent, ReactNode } from 'react'
 import { useEffect, useEffectEvent, useRef, useState } from 'react'
 
 import {
@@ -20,6 +20,7 @@ import type {
   PhotoOutlineBinParams,
   PhotoPoint,
 } from '../lib/gridfinity/types'
+import { FieldHint } from './FieldHint'
 import { NumericFieldControl } from './NumericFieldControl'
 import { PreviewCanvas } from './PreviewCanvas'
 
@@ -37,6 +38,7 @@ interface PhotoOutlineWorkflowProps {
   generation: GenerationResult | null
   isGenerating: boolean
   isPreviewPending: boolean
+  summaryPanel?: ReactNode
   onChange: (key: string, value: JsonValue) => void
   onReset: () => void
 }
@@ -47,6 +49,7 @@ export function PhotoOutlineWorkflow({
   generation,
   isGenerating,
   isPreviewPending,
+  summaryPanel,
   onChange,
   onReset,
 }: PhotoOutlineWorkflowProps) {
@@ -265,8 +268,10 @@ export function PhotoOutlineWorkflow({
         ) : null}
 
         <label className="photo-upload-box">
-          <span>上传俯拍照片</span>
-          <small>建议把目标物与深色 L 形标尺放在同一平面，背景尽量干净。</small>
+          <div className="form-field__top">
+            <span>上传俯拍照片</span>
+            <FieldHint text="建议把目标物与深色 L 形标尺放在同一平面，背景尽量干净。" />
+          </div>
           <input accept="image/*" type="file" onChange={handleFileSelect} />
         </label>
 
@@ -321,9 +326,12 @@ export function PhotoOutlineWorkflow({
           />
 
           <label className="form-field">
-            <span>轮廓模式</span>
-            <small>平滑轮廓更抗表面图案，圆角包络更适合圆角小外壳。</small>
+            <div className="form-field__top">
+              <span>轮廓模式</span>
+              <FieldHint text="平滑轮廓更抗表面图案，圆角包络更适合圆角小外壳。" />
+            </div>
             <select
+              aria-label="轮廓模式"
               value={values.contourMode}
               onChange={(event) =>
                 handleDetectionParamChange(
@@ -349,7 +357,7 @@ export function PhotoOutlineWorkflow({
           />
 
           <NumericFieldControl
-            description="保留在型腔底部的结构厚度。"
+            description="底脚之上的内部底板厚度；从模型最底面量会再叠加底脚高度。"
             label="底厚"
             max={5}
             min={1.2}
@@ -359,11 +367,11 @@ export function PhotoOutlineWorkflow({
           />
         </div>
 
-        <details className="photo-advanced-panel">
-          <summary>识别调节</summary>
-          <p className="panel__body">
-            白色物体、复杂背景或表面图案干扰时，再调这里。
-          </p>
+        <div className="photo-advanced-panel">
+          <div className="form-field__top">
+            <span>识别调节</span>
+            <FieldHint text="白色物体、复杂背景或表面图案干扰时，再调整这里。" />
+          </div>
           <div className="form-grid form-grid--compact">
             <NumericFieldControl
               description="调高可减少浅色背景干扰，调低可保留更多边缘。"
@@ -385,12 +393,12 @@ export function PhotoOutlineWorkflow({
               onChange={(value) => handleDetectionParamChange('simplifyTolerance', value)}
             />
           </div>
-        </details>
+        </div>
 
         <label className="toggle-field">
-          <div>
+          <div className="form-field__top">
             <span>磁铁孔</span>
-            <small>在底部保留 6 x 2mm 磁铁孔阵列。</small>
+            <FieldHint text="在底部保留 6 x 2mm 磁铁孔阵列。" />
           </div>
           <input
             checked={values.magnetHoles}
@@ -401,6 +409,7 @@ export function PhotoOutlineWorkflow({
       </section>
 
       <div className="photo-results-column">
+        {summaryPanel}
         <PreviewCanvas
           bounds={generation?.bounds ?? null}
           isLoading={isGenerating}

@@ -69,7 +69,7 @@ export function PreviewCanvas({
       container.appendChild(renderer.domElement)
     } catch {
       queueMicrotask(() => {
-        setRendererError('当前环境不支持 WebGL 预览，参数编辑和 STL 导出仍可继续。')
+        setRendererError('当前环境不支持 WebGL 预览，参数编辑和 STL / 3MF 导出仍可继续。')
       })
       return
     }

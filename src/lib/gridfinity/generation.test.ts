@@ -1,7 +1,12 @@
 import { booleans, measurements, primitives } from '@jscad/modeling'
 
 import { createBaseBinSolid } from './base'
-import { createBuildContext, generateModel, serializeGeometryToStlParts } from './generation'
+import {
+  createBuildContext,
+  generateModel,
+  serializeGeometryToExportParts,
+  serializeGeometryToStlParts,
+} from './generation'
 import {
   createDefaultGenericShapeEntry,
   resolveGenericShapeCavityPlan,
@@ -136,6 +141,22 @@ describe('gridfinity model generation', () => {
       }),
     ).toThrow()
   })
+
+  it('serializes generated geometry to a non-empty 3MF package', () => {
+    const template = templateList.find((candidate) => candidate.id === 'generic-bin')!
+    const { geometry } = generateModel({
+      templateId: 'generic-bin',
+      params: template.defaultParams,
+      specVersion: defaultGridfinitySpec.version,
+    })
+    const parts = serializeGeometryToExportParts(geometry, '3mf')
+    const totalBytes = parts.reduce((sum, part) => sum + part.byteLength, 0)
+    const signature = new Uint8Array(parts[0] ?? new ArrayBuffer(0)).slice(0, 2)
+
+    expect(parts.length).toBeGreaterThan(0)
+    expect(totalBytes).toBeGreaterThan(128)
+    expect(Array.from(signature)).toEqual([80, 75])
+  }, 15000)
 
   it('creates multiple independent primitive cavities for the parametric cavity template', () => {
     const template = templateList.find((candidate) => candidate.id === 'parametric-cavity-bin')!

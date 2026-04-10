@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 import type {
   AnyTemplateDefinition,
   JsonValue,
-  ParameterField,
   ParameterFieldGroup,
   ParameterPanelSectionId,
   ParameterValues,
@@ -13,7 +12,7 @@ import { AxisInspectorGroup } from './AxisInspectorGroup'
 import { FieldHint } from './FieldHint'
 import { NumericFieldControl } from './NumericFieldControl'
 
-type AnyParameterField = ParameterField<any>
+type AnyParameterField = AnyTemplateDefinition['fields'][number]
 
 interface ParameterPanelProps {
   template: AnyTemplateDefinition
@@ -122,12 +121,6 @@ export function ParameterPanel({
     })
     .filter((section): section is PanelSection => section !== null)
   const modifiedSectionCount = sections.filter((section) => section.isDirty).length
-
-  useEffect(() => {
-    if (validationErrors.length > 0) {
-      setIsAdvancedOpen(true)
-    }
-  }, [validationErrors.length])
 
   function renderField(field: AnyParameterField) {
     if (field.kind === 'boolean') {
@@ -329,7 +322,7 @@ export function ParameterPanel({
             unit: field.unit,
             onChange: (nextValue) => onChange(field.key, nextValue),
           }))}
-          showHint={false}
+          showHint
           title={block.group.label}
         />
       </div>
@@ -356,7 +349,7 @@ export function ParameterPanel({
               : 'parameter-section parameter-section--advanced'
           }
           key={section.id}
-          open={isAdvancedOpen}
+          open={validationErrors.length > 0 || isAdvancedOpen}
         >
           <summary
             className="parameter-section__summary"

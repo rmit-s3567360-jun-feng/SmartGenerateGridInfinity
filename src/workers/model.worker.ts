@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 
-import { generateModel, serializeGeometryToStlParts } from '../lib/gridfinity/generation'
+import { generateModel, serializeGeometryToExportParts } from '../lib/gridfinity/generation'
 import { createImportedAssetRecord } from '../lib/gridfinity/stlImport'
 import type {
   ImportedAssetRecord,
@@ -101,17 +101,18 @@ workerScope.onmessage = (event: MessageEvent<WorkerRequest>) => {
       return
     }
 
-    const { result, geometry } = generateModel(message.payload, context)
+    const { result, geometry } = generateModel(message.payload.request, context)
     const cached = geometryCache.get(result.geometry.cacheKey) ?? geometry
     cacheGeometry(result.geometry.cacheKey, cached)
-    const stlParts = serializeGeometryToStlParts(cached)
+    const fileParts = serializeGeometryToExportParts(cached, message.payload.format)
     const response: WorkerResponse = {
       kind: 'export-success',
       requestId: message.requestId,
-      stlParts,
+      format: message.payload.format,
+      fileParts,
     }
 
-    workerScope.postMessage(response, stlParts)
+    workerScope.postMessage(response, fileParts)
   } catch (error) {
     const response: WorkerResponse = {
       kind: 'error',

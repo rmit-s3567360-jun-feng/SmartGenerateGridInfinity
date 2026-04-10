@@ -8,10 +8,10 @@ export function HomePage() {
     <main className="landing-page">
       <section className="hero">
         <div className="hero__content">
-          <p className="hero__eyebrow">Gridfinity STL Generator</p>
+          <p className="hero__eyebrow">Gridfinity Model Generator</p>
           <h1>用参数直接生成可打印的 Gridfinity 收纳模型</h1>
           <p className="hero__copy">
-            选择模板、调尺寸、实时预览并导出 STL。首版聚焦最常用的
+            选择模板、调尺寸、实时预览并导出 STL / 3MF。首版聚焦最常用的
             Gridfinity bin 变体，覆盖通用盒体、参数化型腔盒、内存卡托盘、照片轮廓收纳、STL 型腔收纳和 STL 改底适配。
           </p>
           <div className="hero__actions">
@@ -37,7 +37,7 @@ export function HomePage() {
             <span>可选磁铁孔规格</span>
           </div>
           <div className="hero__note">
-            所有模型默认按毫米构建，导出的 STL 可直接导入常见切片软件。
+            所有模型默认按毫米构建，导出的 STL / 3MF 可直接导入常见切片软件。
           </div>
         </div>
       </section>
@@ -62,7 +62,7 @@ export function HomePage() {
       <section className="info-strip">
         <div>
           <strong>纯前端生成</strong>
-          <span>浏览器内完成参数化建模与 STL 导出</span>
+          <span>浏览器内完成参数化建模与 STL / 3MF 导出</span>
         </div>
         <div>
           <strong>中文界面</strong>

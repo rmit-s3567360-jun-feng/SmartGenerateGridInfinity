@@ -1,3 +1,4 @@
+import { serialize as serializeTo3mf } from '@jscad/3mf-serializer'
 import { serialize } from '@jscad/stl-serializer'
 
 import { geometryToMeshData, getBoundsFromGeometry } from './mesh'
@@ -6,6 +7,7 @@ import { getTemplateDefinition } from './templates'
 import type {
   GenerationRequest,
   ImportedAssetRecord,
+  ModelExportFormat,
   ParameterValues,
   TemplateBuildContext,
   TemplateBuildOutput,
@@ -63,4 +65,17 @@ export function createBuildContext(
 
 export function serializeGeometryToStlParts(geometry: unknown) {
   return serialize({ binary: true }, geometry) as ArrayBuffer[]
+}
+
+export function serializeGeometryTo3mfParts(geometry: unknown) {
+  return serializeTo3mf({ unit: 'millimeter' }, geometry)
+}
+
+export function serializeGeometryToExportParts(
+  geometry: unknown,
+  format: ModelExportFormat,
+) {
+  return format === '3mf'
+    ? serializeGeometryTo3mfParts(geometry)
+    : serializeGeometryToStlParts(geometry)
 }

@@ -29,6 +29,9 @@
   --axis-x: #ff5a5f;
   --axis-y: #51cf66;
   --axis-z: #4dabf7;
+  --scrollbar-track: rgba(4, 14, 22, 0.78);
+  --scrollbar-thumb: rgba(110, 148, 172, 0.42);
+  --scrollbar-thumb-hover: rgba(244, 179, 90, 0.38);
   --shadow: 0 18px 56px rgba(0, 0, 0, 0.28);
   --shadow-soft: 0 10px 32px rgba(0, 0, 0, 0.2);
   --focus-ring: 0 0 0 3px rgba(244, 179, 90, 0.24);
@@ -461,16 +464,12 @@ ul {
   border-radius: 22px;
   padding: 10px;
   display: flex;
+  align-items: flex-start;
   flex-wrap: wrap;
   gap: 10px;
   background:
     linear-gradient(180deg, rgba(13, 31, 44, 0.92), rgba(7, 18, 27, 0.84));
-  overflow: auto hidden;
-  scrollbar-width: none;
-}
-
-.template-tabs::-webkit-scrollbar {
-  display: none;
+  overflow: visible;
 }
 
 .template-tab {
@@ -585,6 +584,48 @@ ul {
   top: 18px;
   max-height: calc(100vh - 24px);
   overflow: auto;
+}
+
+.photo-control-panel,
+.stl-control-panel,
+.panel--controls,
+.control-stack {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+.photo-control-panel::-webkit-scrollbar,
+.stl-control-panel::-webkit-scrollbar,
+.panel--controls::-webkit-scrollbar,
+.control-stack::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.photo-control-panel::-webkit-scrollbar-track,
+.stl-control-panel::-webkit-scrollbar-track,
+.panel--controls::-webkit-scrollbar-track,
+.control-stack::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+  border-radius: 999px;
+}
+
+.photo-control-panel::-webkit-scrollbar-thumb,
+.stl-control-panel::-webkit-scrollbar-thumb,
+.panel--controls::-webkit-scrollbar-thumb,
+.control-stack::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.photo-control-panel::-webkit-scrollbar-thumb:hover,
+.stl-control-panel::-webkit-scrollbar-thumb:hover,
+.panel--controls::-webkit-scrollbar-thumb:hover,
+.control-stack::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
 }
 
 .control-stack .panel--controls {
@@ -1690,6 +1731,13 @@ ul {
   justify-content: space-between;
   gap: 1rem;
   margin-bottom: 0.9rem;
+  min-width: 0;
+}
+
+.shape-entry-card__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
 }
 

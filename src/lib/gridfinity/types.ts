@@ -15,6 +15,7 @@ export type ParameterValues = Record<string, unknown>
 export type ParameterFieldSection = 'basic' | 'advanced'
 export type AxisName = 'x' | 'y' | 'z'
 export type QuarterTurn = 0 | 1 | 2 | 3
+export type ModelExportFormat = 'stl' | '3mf'
 export type StlFormat = 'ascii' | 'binary'
 
 export interface GridfinitySpec {
@@ -449,7 +450,8 @@ export interface WorkerGenerateSuccess {
 export interface WorkerExportSuccess {
   kind: 'export-success'
   requestId: number
-  stlParts: ArrayBuffer[]
+  format: ModelExportFormat
+  fileParts: ArrayBuffer[]
 }
 
 export interface WorkerImportStlSuccess {
@@ -471,9 +473,18 @@ export type WorkerResponse =
   | WorkerErrorResponse
 
 export interface WorkerGenerateRequest {
-  kind: 'generate' | 'export'
+  kind: 'generate'
   requestId: number
   payload: GenerationRequest
+}
+
+export interface WorkerExportRequest {
+  kind: 'export'
+  requestId: number
+  payload: {
+    format: ModelExportFormat
+    request: GenerationRequest
+  }
 }
 
 export interface WorkerImportStlRequest {
@@ -485,4 +496,7 @@ export interface WorkerImportStlRequest {
   }
 }
 
-export type WorkerRequest = WorkerGenerateRequest | WorkerImportStlRequest
+export type WorkerRequest =
+  | WorkerGenerateRequest
+  | WorkerExportRequest
+  | WorkerImportStlRequest

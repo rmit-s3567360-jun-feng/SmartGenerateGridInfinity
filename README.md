@@ -1,10 +1,10 @@
-# Gridfinity STL Generator
+# Gridfinity Model Generator
 
 一个纯前端的 Gridfinity 参数化模型生成网站，支持：
 
 - 模板化生成 Gridfinity 收纳模型
 - 浏览器内实时预览
-- 导出可 3D 打印的 `STL`
+- 导出可 3D 打印的 `STL / 3MF`
 - 中文参数面板
 
 ## 开发上下文

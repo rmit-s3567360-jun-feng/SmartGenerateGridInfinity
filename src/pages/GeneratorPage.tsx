@@ -34,6 +34,7 @@ import {
 } from '../lib/gridfinity/templates'
 import type {
   GenericBinParams,
+  ModelExportFormat,
   MemoryCardMode,
   MemoryCardTrayParams,
   ParametricCavityBinParams,
@@ -76,6 +77,14 @@ function createTimestamp() {
   return new Date().toISOString().replaceAll(':', '-')
 }
 
+const EXPORT_ACTIONS: Array<{
+  format: ModelExportFormat
+  label: string
+}> = [
+  { format: 'stl', label: '导出 STL' },
+  { format: '3mf', label: '导出 3MF' },
+]
+
 export function GeneratorPage() {
   const { templateId: routeTemplateId } = useParams()
   const templateId = isTemplateId(routeTemplateId)
@@ -85,6 +94,7 @@ export function GeneratorPage() {
 
   const [rawParams, setRawParams] = useState<ParameterValues>(template.defaultParams)
   const [appliedParams, setAppliedParams] = useState<ParameterValues>(template.defaultParams)
+  const [activeExportFormat, setActiveExportFormat] = useState<ModelExportFormat | null>(null)
   const photoParams =
     templateId === 'photo-outline-bin' ? (rawParams as PhotoOutlineBinParams) : null
   const stlCavityParams =
@@ -328,9 +338,9 @@ export function GeneratorPage() {
         <p className="panel__hint">
           {templateId === 'parametric-cavity-bin'
             ? hasUnappliedChanges
-              ? '先生成当前草稿，再导出 STL。'
-              : '当前草稿已同步到预览，可以直接导出 STL。'
-            : '参数校验通过后即可直接导出 STL。'}
+              ? '先生成当前草稿，再导出 STL 或 3MF。'
+              : '当前草稿已同步到预览，可以直接导出 STL 或 3MF。'
+            : '参数校验通过后即可直接导出 STL 或 3MF。'}
         </p>
         <div className="button-row button-row--stack">
           {templateId === 'parametric-cavity-bin' ? (
@@ -343,14 +353,23 @@ export function GeneratorPage() {
               {isGenerating ? '生成中...' : '生成图形'}
             </button>
           ) : null}
-          <button
-            className={templateId === 'parametric-cavity-bin' ? 'button button--ghost button--wide' : 'button button--wide'}
-            disabled={exportDisabled}
-            type="button"
-            onClick={() => void handleExport()}
-          >
-            {isExporting ? '导出中...' : '导出 STL'}
-          </button>
+          {EXPORT_ACTIONS.map((action) => (
+            <button
+              className={
+                templateId === 'parametric-cavity-bin'
+                  ? 'button button--ghost button--wide'
+                  : action.format === 'stl'
+                    ? 'button button--wide'
+                    : 'button button--ghost button--wide'
+              }
+              disabled={exportDisabled}
+              key={action.format}
+              type="button"
+              onClick={() => void handleExport(action.format)}
+            >
+              {formatExportButtonLabel(action.format, isExporting, activeExportFormat)}
+            </button>
+          ))}
         </div>
       </section>
     ) : null
@@ -470,15 +489,21 @@ export function GeneratorPage() {
     setAppliedParams(rawParams)
   }
 
-  async function handleExport() {
-    const stlBuffer = await exportModel()
-    const blob = new Blob([stlBuffer], { type: 'model/stl' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `gridfinity-${template.id}-${createTimestamp()}.stl`
-    link.click()
-    URL.revokeObjectURL(url)
+  async function handleExport(format: ModelExportFormat) {
+    setActiveExportFormat(format)
+
+    try {
+      const exportedFile = await exportModel(format)
+      const blob = new Blob([exportedFile.buffer], { type: exportedFile.mimeType })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `gridfinity-${template.id}-${createTimestamp()}.${exportedFile.extension}`
+      link.click()
+      URL.revokeObjectURL(url)
+    } finally {
+      setActiveExportFormat(null)
+    }
   }
 
   return (
@@ -493,14 +518,17 @@ export function GeneratorPage() {
         </div>
         {isDedicatedWorkflow ? (
           <div className="hero__actions">
-            <button
-              className="button"
-              disabled={exportDisabled}
-              type="button"
-              onClick={() => void handleExport()}
-            >
-              {isExporting ? '导出中...' : '导出 STL'}
-            </button>
+            {EXPORT_ACTIONS.map((action) => (
+              <button
+                className={action.format === 'stl' ? 'button' : 'button button--ghost'}
+                disabled={exportDisabled}
+                key={action.format}
+                type="button"
+                onClick={() => void handleExport(action.format)}
+              >
+                {formatExportButtonLabel(action.format, isExporting, activeExportFormat)}
+              </button>
+            ))}
           </div>
         ) : null}
       </header>
@@ -825,4 +853,18 @@ function resolveSummaryStatusLabel(context: Pick<
 
 function formatSizeLabel(size: [number, number, number]) {
   return `${size[0].toFixed(1)} x ${size[1].toFixed(1)} x ${size[2].toFixed(1)} mm`
+}
+
+function formatExportButtonLabel(
+  format: ModelExportFormat,
+  isExporting: boolean,
+  activeExportFormat: ModelExportFormat | null,
+) {
+  const formatLabel = format === '3mf' ? '3MF' : 'STL'
+
+  if (isExporting && activeExportFormat === format) {
+    return `导出 ${formatLabel} 中...`
+  }
+
+  return `导出 ${formatLabel}`
 }

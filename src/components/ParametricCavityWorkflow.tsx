@@ -11,6 +11,7 @@ import type {
   TemplateDefinition,
 } from '../lib/gridfinity/types'
 import { AxisInspectorGroup } from './AxisInspectorGroup'
+import { FieldHint } from './FieldHint'
 import { ParameterPanel } from './ParameterPanel'
 
 interface ParametricCavityWorkflowProps {
@@ -151,10 +152,13 @@ export function ParametricCavityWorkflow({
           </div>
         </details>
         <div className="shape-entry-list">
-          {values.shapeEntries.map((entry, index) => (
+          {values.shapeEntries.map((entry) => (
             <article className="shape-entry-card" key={entry.id}>
               <div className="shape-entry-card__header">
-                <strong title={`形状 ${index + 1}`}>形状 {index + 1}</strong>
+                <div className="shape-entry-card__title">
+                  <strong title={entry.label}>{entry.label}</strong>
+                  <FieldHint text={`当前形状使用系统自动命名；复制、粘贴和复制一份时会沿用或追加标签。`} />
+                </div>
                 <div className="shape-entry-card__actions">
                   <button
                     className="button button--ghost"
@@ -189,21 +193,15 @@ export function ParametricCavityWorkflow({
               </div>
 
               <div className="form-grid form-grid--shape">
-                <TextInput
-                  label="名称"
-                  value={entry.label}
-                  onChange={(nextValue) =>
-                    updateEntry(entry.id, (current) => ({
-                      ...current,
-                      label: nextValue,
-                    }))
-                  }
-                />
-
                 <label className="form-field form-field--compact">
-                  <span title="形状">形状</span>
+                  <div className="form-field__top">
+                    <span title="形状类型">形状类型</span>
+                    <div className="form-field__meta">
+                      <FieldHint text="选择当前型腔使用的基础轮廓；不同形状会切换对应的尺寸字段。" />
+                    </div>
+                  </div>
                   <select
-                    aria-label="形状"
+                    aria-label="形状类型"
                     value={entry.kind}
                     onChange={(event) =>
                       updateEntry(entry.id, (current) => ({
@@ -221,6 +219,7 @@ export function ParametricCavityWorkflow({
 
                 <NumericInput
                   label="数量"
+                  description="同一条形状会按当前尺寸和旋转复制多个独立型腔。"
                   step={1}
                   unit="个"
                   value={entry.quantity}
@@ -236,13 +235,15 @@ export function ParametricCavityWorkflow({
               <AxisInspectorGroup
                 compact
                 items={createShapeAxisItems(entry, updateEntry)}
-                showHint={false}
+                showHint
+                title="尺寸"
               />
 
               {entry.kind === 'rounded-rectangle' ? (
                 <div className="form-grid form-grid--shape form-grid--shape-secondary">
                   <NumericInput
                     label="圆角"
+                    description="只对圆角矩形生效；圆角半径不能超过短边的一半。"
                     unit="mm"
                     value={entry.cornerRadius}
                     onChange={(nextValue) =>
@@ -258,8 +259,9 @@ export function ParametricCavityWorkflow({
               <div className="shape-entry-card__advanced">
                 <AxisInspectorGroup
                   compact
+                  description="固定 X / Y / Z 旋转，只会在你点击生成图形后应用到型腔。"
                   items={createRotationAxisItems(entry, updateEntry)}
-                  showHint={false}
+                  showHint
                   title="固定旋转"
                 />
               </div>
@@ -290,7 +292,7 @@ function createShapeAxisItems(
       {
         axis: 'x',
         value: entry.diameter,
-        caption: '直径',
+        caption: '圆形直径；圆在 X / Y 方向始终共用同一个直径。',
         unit: 'mm',
         onChange: (nextValue) =>
           updateEntry(entry.id, (current) => ({
@@ -301,7 +303,7 @@ function createShapeAxisItems(
       {
         axis: 'y',
         value: entry.diameter,
-        caption: '圆形截面',
+        caption: '圆形截面预览；Y 方向会和当前直径保持一致。',
         unit: 'mm',
         onChange: (nextValue) =>
           updateEntry(entry.id, (current) => ({
@@ -312,7 +314,7 @@ function createShapeAxisItems(
       {
         axis: 'z',
         value: entry.height,
-        caption: '高度',
+        caption: '圆形型腔在 Z 方向的目标高度。',
         unit: 'mm',
         onChange: (nextValue) =>
           updateEntry(entry.id, (current) => ({
@@ -330,7 +332,7 @@ function createShapeAxisItems(
       {
         axis: 'x',
         value: entry.length,
-        caption: '总长',
+        caption: '胶囊槽在 X 方向的总长度。',
         unit: 'mm',
         onChange: (nextValue) =>
           updateEntry(entry.id, (current) => ({
@@ -341,7 +343,7 @@ function createShapeAxisItems(
       {
         axis: 'y',
         value: entry.diameter,
-        caption: '直径',
+        caption: '胶囊槽圆端与槽宽共用的直径。',
         unit: 'mm',
         onChange: (nextValue) =>
           updateEntry(entry.id, (current) => ({
@@ -352,7 +354,7 @@ function createShapeAxisItems(
       {
         axis: 'z',
         value: entry.height,
-        caption: '高度',
+        caption: '胶囊槽在 Z 方向的目标高度。',
         unit: 'mm',
         onChange: (nextValue) =>
           updateEntry(entry.id, (current) => ({
@@ -369,7 +371,7 @@ function createShapeAxisItems(
     {
       axis: 'x',
       value: entry.width,
-      caption: '尺寸 X',
+      caption: '当前形状在 X 方向的占位尺寸。',
       unit: 'mm',
       onChange: (nextValue) =>
         updateEntry(entry.id, (current) => ({
@@ -380,7 +382,7 @@ function createShapeAxisItems(
     {
       axis: 'y',
       value: entry.depth,
-      caption: '尺寸 Y',
+      caption: '当前形状在 Y 方向的占位尺寸。',
       unit: 'mm',
       onChange: (nextValue) =>
         updateEntry(entry.id, (current) => ({
@@ -391,7 +393,7 @@ function createShapeAxisItems(
     {
       axis: 'z',
       value: entry.height,
-      caption: '尺寸 Z',
+      caption: '当前形状在 Z 方向的占位高度。',
       unit: 'mm',
       onChange: (nextValue) =>
         updateEntry(entry.id, (current) => ({
@@ -417,7 +419,7 @@ function createRotationAxisItems(
   return (['x', 'y', 'z'] as const).map((axis) => ({
     axis,
     value: String(entry[rotationFieldByAxis[axis]]),
-    caption: `旋转 ${axis.toUpperCase()}`,
+    caption: `绕 ${axis.toUpperCase()} 轴旋转 0 / 90 / 180 / 270 度。`,
     options: rotationOptions,
     onChange: (nextValue: string) =>
       updateEntry(entry.id, (current) => ({
@@ -427,32 +429,9 @@ function createRotationAxisItems(
   }))
 }
 
-interface TextInputProps {
-  label: string
-  value: string
-  onChange: (value: string) => void
-}
-
-function TextInput({
-  label,
-  value,
-  onChange,
-}: TextInputProps) {
-  return (
-    <label className="form-field form-field--compact">
-      <span title={label}>{label}</span>
-      <input
-        aria-label={label}
-        type="text"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      />
-    </label>
-  )
-}
-
 interface NumericInputProps {
   label: string
+  description?: string
   step?: number
   unit?: string
   value: number
@@ -461,6 +440,7 @@ interface NumericInputProps {
 
 function NumericInput({
   label,
+  description,
   step = 0.1,
   unit,
   value,
@@ -473,7 +453,10 @@ function NumericInput({
     <label className="form-field form-field--compact">
       <div className="form-field__top">
         <span title={label}>{label}</span>
-        {unit ? <small className="field-unit">{unit}</small> : null}
+        <div className="form-field__meta">
+          {unit ? <small className="field-unit">{unit}</small> : null}
+          {description ? <FieldHint text={description} /> : null}
+        </div>
       </div>
       <input
         aria-label={label}

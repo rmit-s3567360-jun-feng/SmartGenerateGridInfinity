@@ -25,7 +25,7 @@
 - 在浏览器里调整参数
 - 生成符合常见 Gridfinity 兼容尺寸的收纳模型
 - 实时预览 3D 网格
-- 导出可 3D 打印的 STL
+- 导出可 3D 打印的 STL / 3MF
 
 当前版本不做账号、云端模板库、项目协作、底板 / 盖子生态。
 
@@ -56,7 +56,7 @@
   - 已补齐 `1600px / 1920px` 超宽屏布局适配
 - 几何生成：浏览器内 Worker 执行
 - 3D 预览：`three.js`
-- 导出格式：`STL`
+- 导出格式：`STL / 3MF`
 - 辅助脚本：
   - Windows 本地一键启动
   - Linux 云服务器构建发布
@@ -67,7 +67,7 @@
 - 路由：React Router
 - 参数校验：zod
 - 几何建模：`@jscad/modeling`
-- STL 导出：`@jscad/stl-serializer`
+- 导出序列化：`@jscad/stl-serializer`、`@jscad/3mf-serializer`
 - 3D 预览：`three.js`
 - 测试：
   - Vitest
@@ -97,7 +97,7 @@
 - `src/hooks/useModelGenerator.ts`
   - Worker 通信、生成状态、导出状态
 - `src/workers/model.worker.ts`
-  - 真正执行几何生成与 STL 序列化
+  - 真正执行几何生成与 STL / 3MF 序列化
 - `src/lib/gridfinity/base.ts`
   - 基础外壳、逐格脚位、磁铁孔、内部底板基准
 - `src/lib/gridfinity/templates.ts`
@@ -148,6 +148,7 @@
 - 支持 `x-first / y-first` 两种排列方式
 - 支持手动点击“生成图形”，避免调参时每次都重算
 - 支持单件复制 / 粘贴 / 粘贴新增
+- 形状 `label` 继续用于自动命名，但界面不再允许手动编辑名称
 
 ### 内存卡托盘
 
@@ -206,6 +207,8 @@ DEPLOY_ROOT=/var/www/gridfinity-generator ./scripts/build-release.sh
 - 参数化型腔盒移除自动旋转与姿态限制开关，改为固定 `X / Y / Z` 手动旋转
 - 参数化型腔盒新增 `arrangementMode`，支持 `X -> Y -> Z` 与 `Y -> X -> Z` 两种排列方式
 - 生成器摘要区与手动生成流程已同步到新的参数语义
+- 模板切换改为按 `templateId` 重挂载，切模板时不再依赖手动刷新
+- 导出链路已扩展为 `STL + 3MF` 双出口，并保持纯前端 Worker 架构
 
 最近一次已验证通过：
 
@@ -216,6 +219,7 @@ DEPLOY_ROOT=/var/www/gridfinity-generator ./scripts/build-release.sh
 当前这轮重点验证覆盖：
 
 - 参数化型腔盒的固定旋转、排列方式、独立型腔与手动生成流程
+- 模板切换无需刷新、参数化型腔卡片问号提示与 3MF 导出
 - 生成器页摘要区与参数面板联动
 - 构建链路与导出主流程基本可用
 
@@ -224,7 +228,7 @@ DEPLOY_ROOT=/var/www/gridfinity-generator ./scripts/build-release.sh
 - `three.js` 预览分包仍有一个 chunk 略高于 Vite 默认 `500kB` 告警阈值，但不阻塞功能
 - 当前 Gridfinity 结构属于“社区兼容优先”的实现，不是对某一原始标准的逐细节复刻
 - 图像识别仍在主线程执行，复杂图片时会影响交互流畅度
-- 目前只导出 STL，不支持 3MF、STEP 或项目保存
+- 目前仍不支持 STEP、项目保存或切片预设联动
 
 ## 10. 下一步建议
 
@@ -232,7 +236,7 @@ DEPLOY_ROOT=/var/www/gridfinity-generator ./scripts/build-release.sh
 2. 继续补齐照片轮廓收纳的取物凹槽和识别 Worker
 3. 继续微调参数面板的移动端紧凑布局与短标签治理
 4. 增加项目参数保存 / 导入导出 JSON
-5. 评估 3MF 导出或切片友好配置
+5. 继续评估切片友好配置或更多工程格式
 
 ## 11. 交接提醒
 

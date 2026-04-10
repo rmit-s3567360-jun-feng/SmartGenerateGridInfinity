@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, vi } from 'vitest'
@@ -12,7 +12,13 @@ vi.mock('../components/PreviewCanvas', () => ({
   ),
 }))
 
-const { useModelGeneratorMock } = vi.hoisted(() => ({
+const { exportModelMock, useModelGeneratorMock } = vi.hoisted(() => ({
+  exportModelMock: vi.fn(async (format: 'stl' | '3mf' = 'stl') => ({
+    buffer: new ArrayBuffer(128),
+    extension: format,
+    format,
+    mimeType: format === '3mf' ? 'model/3mf' : 'model/stl',
+  })),
   useModelGeneratorMock: vi.fn(
     (templateId: unknown, generationParams: unknown, options?: unknown) => {
       void templateId
@@ -38,7 +44,7 @@ const { useModelGeneratorMock } = vi.hoisted(() => ({
         isPreviewPending: false,
         runtimeError: null,
         validationErrors: [],
-        exportModel: vi.fn(async () => new ArrayBuffer(128)),
+        exportModel: exportModelMock,
         importStlSource: vi.fn(async () => ({
           assetId: 'asset-1',
           name: 'fixture.stl',
@@ -65,7 +71,21 @@ import { GeneratorPage } from './GeneratorPage'
 
 describe('GeneratorPage', () => {
   beforeEach(() => {
+    exportModelMock.mockClear()
     useModelGeneratorMock.mockClear()
+
+    Object.defineProperty(URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => 'blob:mock'),
+      writable: true,
+    })
+    Object.defineProperty(URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn(),
+      writable: true,
+    })
+
+    HTMLAnchorElement.prototype.click = vi.fn()
   })
 
   function getLastGeneratorCall() {
@@ -76,6 +96,7 @@ describe('GeneratorPage', () => {
           arrangementMode?: string
           gridX?: number
           shapeEntries: Array<{
+            kind?: string
             label?: string
             quantity?: number
             rotationX?: number
@@ -103,6 +124,7 @@ describe('GeneratorPage', () => {
     expect(screen.getAllByText('通用收纳盒').length).toBeGreaterThan(0)
     expect(screen.getByText('preview-canvas-mock')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '导出 STL' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '导出 3MF' })).toBeEnabled()
     expect(screen.getByText('基础尺寸')).toBeInTheDocument()
     expect(screen.getByText('内部结构 / 排布')).toBeInTheDocument()
     expect(screen.getByText('附加功能')).toBeInTheDocument()
@@ -147,12 +169,13 @@ describe('GeneratorPage', () => {
     expect(screen.getAllByText('参数化型腔盒').length).toBeGreaterThan(0)
     expect(screen.getByText('基础形状')).toBeInTheDocument()
     expect(screen.getByRole('spinbutton', { name: 'XY 清隙' })).toBeInTheDocument()
-    expect(screen.getByDisplayValue('形状 1')).toBeInTheDocument()
+    expect(screen.getByText('形状 1')).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: '名称' })).not.toBeInTheDocument()
     expect(screen.queryByText('布局模式')).not.toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: '尺寸模式' })).not.toBeInTheDocument()
   })
 
-  it('keeps shape-cavity edits as draft until the user clicks generate', () => {
+  it('keeps shape-type edits as draft until the user clicks generate', () => {
     render(
       <MemoryRouter initialEntries={['/generator/parametric-cavity-bin']}>
         <Routes>
@@ -161,27 +184,25 @@ describe('GeneratorPage', () => {
       </MemoryRouter>,
     )
 
-    const nameLabel = screen.getByText('名称').closest('label')
-    const nameInput = nameLabel?.querySelector('input')
-
-    expect(nameInput).not.toBeNull()
-    fireEvent.change(nameInput as HTMLInputElement, {
-      target: { value: '卡块 A' },
+    fireEvent.change(screen.getByRole('combobox', { name: '形状类型' }), {
+      target: { value: 'circle' },
     })
 
     const afterEditArgs = getLastGeneratorCall()
 
     expect(afterEditArgs[2]).toMatchObject({ autoGenerate: false })
-    expect(afterEditArgs[1].shapeEntries[0].label).toBe('形状 1')
+    expect(afterEditArgs[1].shapeEntries[0].kind).toBe('rectangle')
     expect(screen.getByText('当前草稿尚未生成')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '导出 STL' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '导出 3MF' })).toBeDisabled()
 
     fireEvent.click(screen.getByRole('button', { name: '生成图形' }))
 
     const afterGenerateArgs = getLastGeneratorCall()
 
-    expect(afterGenerateArgs[1].shapeEntries[0].label).toBe('卡块 A')
+    expect(afterGenerateArgs[1].shapeEntries[0].kind).toBe('circle')
     expect(screen.getByRole('button', { name: '导出 STL' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '导出 3MF' })).toBeEnabled()
   })
 
   it('allows clearing and re-entering numeric shape inputs before manual generation', () => {
@@ -255,7 +276,7 @@ describe('GeneratorPage', () => {
     )
 
     expect(screen.queryByRole('button', { name: /高级姿态/ })).not.toBeInTheDocument()
-    fireEvent.change(screen.getByRole('combobox', { name: '旋转 X' }), {
+    fireEvent.change(screen.getByRole('combobox', { name: '绕 X 轴旋转 0 / 90 / 180 / 270 度。' }), {
       target: { value: '1' },
     })
 
@@ -436,5 +457,47 @@ describe('GeneratorPage', () => {
     expect(screen.getByText('顶部余量')).toBeInTheDocument()
     expect(screen.getByText('壁厚')).toBeInTheDocument()
     expect(screen.getByText('型腔规则')).toBeInTheDocument()
+  })
+
+  it('requests 3MF export with the matching format and file extension', async () => {
+    const originalCreateElement = document.createElement.bind(document)
+    let downloadFileName = ''
+
+    const createElementSpy = vi.spyOn(document, 'createElement').mockImplementation(
+      ((tagName: string, options?: ElementCreationOptions) => {
+        const element = originalCreateElement(tagName, options)
+
+        if (tagName === 'a') {
+          Object.defineProperty(element, 'download', {
+            configurable: true,
+            get: () => downloadFileName,
+            set: (value) => {
+              downloadFileName = String(value)
+            },
+          })
+        }
+
+        return element
+      }) as typeof document.createElement,
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/generator/generic-bin']}>
+        <Routes>
+          <Route element={<GeneratorPage />} path="/generator/:templateId" />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '导出 3MF' }))
+
+    await waitFor(() => {
+      expect(exportModelMock).toHaveBeenCalledWith('3mf')
+    })
+
+    expect(downloadFileName).toMatch(/\.3mf$/)
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
+
+    createElementSpy.mockRestore()
   })
 })

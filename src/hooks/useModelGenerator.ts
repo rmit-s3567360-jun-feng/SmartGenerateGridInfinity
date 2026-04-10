@@ -8,6 +8,7 @@ import type {
   GenerationRequest,
   GenerationResult,
   ImportedStlSourceSummary,
+  ModelExportFormat,
   ParameterValues,
   TemplateId,
   WorkerRequest,
@@ -24,6 +25,18 @@ interface UseModelGeneratorOptions {
   autoGenerate?: boolean
   exportParams?: ParameterValues
   validationParams?: ParameterValues
+}
+
+interface ExportedModelFile {
+  buffer: ArrayBuffer
+  extension: ModelExportFormat
+  format: ModelExportFormat
+  mimeType: string
+}
+
+const EXPORT_MIME_TYPES: Record<ModelExportFormat, string> = {
+  stl: 'model/stl',
+  '3mf': 'model/3mf',
 }
 
 export function useModelGenerator(
@@ -169,11 +182,11 @@ export function useModelGenerator(
       })
   }, [effectiveGenerationParams, template, templateId])
 
-  async function exportModel() {
+  async function exportModel(format: ModelExportFormat = 'stl'): Promise<ExportedModelFile> {
     const parsed = template.schema.safeParse(exportSource)
 
     if (!parsed.success) {
-      throw new Error('参数校验未通过，无法导出 STL。')
+      throw new Error(`参数校验未通过，无法导出 ${format.toUpperCase()}。`)
     }
 
     setIsExporting(true)
@@ -184,9 +197,12 @@ export function useModelGenerator(
         kind: 'export',
         requestId: createRequestId(),
         payload: {
-          templateId,
-          params: parsed.data,
-          specVersion: defaultGridfinitySpec.version,
+          format,
+          request: {
+            templateId,
+            params: parsed.data,
+            specVersion: defaultGridfinitySpec.version,
+          },
         },
       })
 
@@ -194,7 +210,12 @@ export function useModelGenerator(
         throw new Error('导出失败。')
       }
 
-      return mergeArrayBuffers(response.stlParts)
+      return {
+        buffer: mergeArrayBuffers(response.fileParts),
+        extension: response.format,
+        format: response.format,
+        mimeType: EXPORT_MIME_TYPES[response.format],
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : '导出失败。'
       setRuntimeError(message)
